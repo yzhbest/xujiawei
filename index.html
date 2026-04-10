@@ -1,0 +1,1289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI智能竞价选股系统 v2.0</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* === RESET & VARIABLES === */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg-primary: #070b14;
+  --bg-secondary: #0c1220;
+  --bg-tertiary: #111a2e;
+  --bg-panel: #0e1529;
+  --bg-hover: #162040;
+  --bg-row-alt: #0a1020;
+  --border: #1a2744;
+  --border-hl: #243a64;
+  --text-1: #dce4f0;
+  --text-2: #7a8ea8;
+  --text-3: #4a5e78;
+  --up: #ef4444;
+  --up-bg: rgba(239,68,68,.12);
+  --down: #22c55e;
+  --down-bg: rgba(34,197,94,.12);
+  --accent: #3b82f6;
+  --accent-bg: rgba(59,130,246,.12);
+  --gold: #f59e0b;
+  --gold-bg: rgba(245,158,11,.12);
+  --warn: #f97316;
+  --font-mono: 'JetBrains Mono', 'Consolas', monospace;
+  --font-sans: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+}
+html, body { height: 100%; overflow: hidden; background: var(--bg-primary); color: var(--text-1); font-family: var(--font-sans); font-size: 13px; line-height: 1.5; }
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: var(--border-hl); border-radius: 3px; }
+
+/* === LAYOUT === */
+body { display: flex; flex-direction: column; }
+.header { height: 52px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; background: linear-gradient(180deg, #0f1a30 0%, var(--bg-secondary) 100%); border-bottom: 1px solid var(--border); z-index: 10; }
+.app-layout { flex: 1; display: flex; overflow: hidden; min-height: 0; }
+.sidebar { width: 256px; flex-shrink: 0; background: var(--bg-secondary); border-right: 1px solid var(--border); overflow-y: auto; display: flex; flex-direction: column; }
+.main-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.ai-panel { width: 320px; flex-shrink: 0; background: var(--bg-secondary); border-left: 1px solid var(--border); overflow-y: auto; }
+.status-bar { height: 32px; flex-shrink: 0; display: flex; align-items: center; padding: 0 16px; background: var(--bg-secondary); border-top: 1px solid var(--border); font-size: 11px; color: var(--text-2); gap: 16px; }
+
+/* === HEADER === */
+.header .h-left { display: flex; align-items: center; gap: 14px; }
+.header .h-logo { font-size: 16px; font-weight: 700; letter-spacing: 1px; background: linear-gradient(135deg, var(--up) 0%, var(--gold) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; white-space: nowrap; }
+.header .h-ver { font-size: 10px; color: var(--text-3); background: var(--bg-tertiary); padding: 2px 8px; border-radius: 3px; font-family: var(--font-mono); }
+.header .h-center { display: flex; align-items: center; gap: 24px; }
+.h-status { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.h-dot { width: 7px; height: 7px; border-radius: 50%; }
+.h-dot.on { background: var(--down); box-shadow: 0 0 6px var(--down); animation: pulse 2s infinite; }
+.h-dot.warn { background: var(--gold); box-shadow: 0 0 6px var(--gold); animation: pulse 1.5s infinite; }
+.h-dot.off { background: #555; }
+.h-phase { padding: 3px 10px; border-radius: 3px; font-size: 11px; font-weight: 500; }
+.h-phase.auction { background: var(--up-bg); color: var(--up); border: 1px solid rgba(239,68,68,.3); }
+.h-phase.trading { background: var(--down-bg); color: var(--down); border: 1px solid rgba(34,197,94,.3); }
+.h-phase.closed { background: rgba(100,100,120,.15); color: var(--text-3); border: 1px solid rgba(100,100,120,.2); }
+.header .h-right { display: flex; align-items: center; gap: 14px; }
+.h-clock { font-family: var(--font-mono); font-size: 20px; font-weight: 700; color: var(--gold); letter-spacing: 2px; }
+.h-date { font-size: 11px; color: var(--text-3); }
+.h-btn { background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-2); padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-family: var(--font-sans); transition: all .2s; }
+.h-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* === SIDEBAR === */
+.sb-section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.sb-title { font-size: 12px; font-weight: 700; color: var(--text-2); margin-bottom: 12px; display: flex; align-items: center; gap: 6px; letter-spacing: 1px; text-transform: uppercase; }
+.sb-title::before { content: ''; width: 3px; height: 14px; background: var(--accent); border-radius: 2px; }
+.sb-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; font-size: 12px; color: var(--text-1); }
+.sb-item label { cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.toggle { position: relative; width: 36px; height: 18px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 9px; cursor: pointer; transition: all .3s; flex-shrink: 0; }
+.toggle.active { background: var(--accent); border-color: var(--accent); }
+.toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; background: #fff; border-radius: 50%; transition: transform .3s; }
+.toggle.active::after { transform: translateX(18px); }
+.sb-slider-group { margin-top: 6px; }
+.sb-slider-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-3); margin-bottom: 4px; }
+.sb-slider { width: 100%; height: 4px; -webkit-appearance: none; appearance: none; background: var(--bg-primary); border-radius: 2px; outline: none; }
+.sb-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; background: var(--accent); border-radius: 50%; cursor: pointer; border: 2px solid var(--bg-secondary); }
+.sb-btn { width: 100%; padding: 10px; border: none; border-radius: 6px; font-size: 14px; font-weight: 700; font-family: var(--font-sans); cursor: pointer; transition: all .2s; letter-spacing: 2px; }
+.sb-btn.primary { background: linear-gradient(135deg, var(--up) 0%, #dc2626 100%); color: #fff; }
+.sb-btn.primary:hover { filter: brightness(1.15); transform: translateY(-1px); }
+.sb-btn.secondary { background: var(--bg-tertiary); color: var(--text-2); border: 1px solid var(--border); margin-top: 8px; font-size: 12px; }
+.sb-btn.secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+/* === MAIN TABLE === */
+.table-toolbar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); flex-shrink: 0; }
+.table-toolbar .search-box { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px; padding: 5px 10px; color: var(--text-1); font-size: 12px; font-family: var(--font-sans); width: 180px; outline: none; transition: border-color .2s; }
+.table-toolbar .search-box:focus { border-color: var(--accent); }
+.table-toolbar .chip { padding: 4px 10px; border-radius: 3px; font-size: 11px; cursor: pointer; border: 1px solid var(--border); color: var(--text-2); background: var(--bg-tertiary); transition: all .2s; }
+.table-toolbar .chip.active { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+.table-toolbar .chip:hover { border-color: var(--accent); }
+.tb-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.tb-count { font-size: 11px; color: var(--text-3); font-family: var(--font-mono); }
+.table-scroll { flex: 1; overflow: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+thead { position: sticky; top: 0; z-index: 5; }
+thead th { background: var(--bg-tertiary); color: var(--text-2); font-weight: 500; padding: 8px 6px; text-align: center; border-bottom: 2px solid var(--border-hl); cursor: pointer; white-space: nowrap; font-size: 11px; user-select: none; transition: color .2s; }
+thead th:hover { color: var(--accent); }
+thead th.sorted { color: var(--accent); }
+thead th .sort-arrow { font-size: 9px; margin-left: 2px; }
+tbody tr { border-bottom: 1px solid rgba(26,39,68,.4); transition: background .15s; cursor: pointer; }
+tbody tr:nth-child(even) { background: var(--bg-row-alt); }
+tbody tr:hover { background: var(--bg-hover); }
+tbody tr.selected { background: rgba(59,130,246,.08); border-left: 2px solid var(--accent); }
+tbody tr.top-signal { background: rgba(239,68,68,.14); border-left: 3px solid var(--up); }
+tbody td { padding: 7px 6px; text-align: center; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; }
+td.name-cell { font-family: var(--font-sans); text-align: left; padding-left: 8px; }
+td.code-cell { color: var(--gold); }
+td.sector-cell { font-family: var(--font-sans); }
+.text-up { color: var(--up); }
+.text-down { color: var(--down); }
+.text-flat { color: var(--text-3); }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 10px; font-weight: 500; font-family: var(--font-sans); }
+.badge-strong { background: var(--up); color: #fff; animation: glow-pulse 1.5s infinite; }
+.badge-mid { background: var(--gold-bg); color: var(--gold); border: 1px solid rgba(245,158,11,.3); }
+.badge-weak { background: rgba(100,100,120,.15); color: var(--text-3); }
+.signal-bar { width: 60px; height: 6px; background: var(--bg-primary); border-radius: 3px; overflow: hidden; display: inline-block; vertical-align: middle; }
+.signal-bar-fill { height: 100%; border-radius: 3px; transition: width .5s ease; }
+.signal-strong-buy { background: var(--up-bg); color: var(--up); border: 1px solid rgba(239,68,68,.3); }
+.signal-buy { background: var(--gold-bg); color: var(--gold); border: 1px solid rgba(245,158,11,.3); }
+.signal-watch { background: var(--accent-bg); color: var(--accent); border: 1px solid rgba(59,130,246,.3); }
+.signal-avoid { background: rgba(100,100,120,.12); color: var(--text-3); border: 1px solid rgba(100,100,120,.2); }
+.ai-score { font-weight: 700; }
+.checkbox-cell { width: 30px; }
+.cb { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+.buy-btn { padding: 3px 10px; border: 1px solid var(--up); color: var(--up); background: transparent; border-radius: 3px; font-size: 11px; cursor: pointer; font-family: var(--font-sans); transition: all .2s; }
+.buy-btn:hover { background: var(--up); color: #fff; }
+
+/* === CAPITAL FLOW BAR === */
+.capital-flow-bar { padding: 8px 16px; background: var(--bg-primary); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.cfb-label { color: var(--down); font-size: 12px; font-weight: 700; white-space: nowrap; }
+.cfb-sectors { color: var(--gold); font-size: 13px; font-weight: 500; letter-spacing: 1px; }
+
+/* === AI PANEL === */
+.ai-header { padding: 16px; border-bottom: 1px solid var(--border); }
+.ai-stock-name { font-size: 18px; font-weight: 700; }
+.ai-stock-code { font-family: var(--font-mono); color: var(--gold); font-size: 13px; margin-top: 2px; }
+.ai-score-big { font-size: 48px; font-weight: 700; font-family: var(--font-mono); text-align: center; padding: 16px 0 8px; }
+.ai-rec { text-align: center; margin-bottom: 12px; }
+.ai-rec .badge { font-size: 13px; padding: 4px 16px; }
+.radar-wrap { padding: 8px 24px 16px; }
+.radar-chart { width: 100%; max-width: 260px; margin: 0 auto; display: block; overflow: visible; }
+.radar-guide { fill: none; stroke: var(--border); stroke-width: .5; }
+.radar-axis { stroke: var(--border); stroke-width: .5; }
+.radar-data { fill: rgba(59,130,246,.15); stroke: var(--accent); stroke-width: 1.5; transition: all .5s; }
+.radar-dot { fill: var(--accent); }
+.radar-label { fill: var(--text-2); font-size: 10px; font-family: var(--font-sans); }
+.ai-dims { padding: 0 16px 16px; }
+.ai-dim-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; }
+.ai-dim-label { width: 65px; color: var(--text-2); font-size: 11px; flex-shrink: 0; }
+.ai-dim-bar { flex: 1; height: 6px; background: var(--bg-primary); border-radius: 3px; overflow: hidden; }
+.ai-dim-fill { height: 100%; border-radius: 3px; transition: width .6s ease; }
+.ai-dim-val { width: 30px; text-align: right; font-family: var(--font-mono); font-size: 11px; color: var(--text-1); }
+.ai-section { padding: 12px 16px; border-top: 1px solid var(--border); }
+.ai-section-title { font-size: 11px; color: var(--text-3); margin-bottom: 8px; font-weight: 500; letter-spacing: 1px; }
+.ai-detail-row { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; }
+.ai-detail-row .lbl { color: var(--text-2); }
+.ai-log { max-height: 140px; overflow-y: auto; }
+.ai-log-item { font-size: 11px; padding: 4px 0; border-bottom: 1px solid rgba(26,39,68,.3); display: flex; justify-content: space-between; }
+.ai-log-time { color: var(--text-3); font-family: var(--font-mono); font-size: 10px; }
+
+/* === MODAL === */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.65); backdrop-filter: blur(4px); z-index: 100; display: none; align-items: center; justify-content: center; }
+.modal-overlay.show { display: flex; }
+.modal-card { background: var(--bg-secondary); border: 1px solid var(--border-hl); border-radius: 12px; padding: 28px; width: 420px; max-width: 90vw; animation: modal-in .25s ease; }
+.modal-card h3 { font-size: 16px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+.modal-warn-icon { color: var(--gold); font-size: 22px; }
+.modal-info { background: var(--bg-primary); border-radius: 8px; padding: 14px; margin-bottom: 16px; }
+.modal-info-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 13px; }
+.modal-info-row .lbl { color: var(--text-2); }
+.modal-input-group { margin-bottom: 16px; }
+.modal-input-group label { display: block; font-size: 12px; color: var(--text-2); margin-bottom: 6px; }
+.modal-input { width: 100%; padding: 8px 12px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-1); font-size: 14px; font-family: var(--font-mono); outline: none; }
+.modal-input:focus { border-color: var(--accent); }
+.modal-disclaimer { font-size: 11px; color: var(--warn); background: rgba(249,115,22,.08); border-radius: 4px; padding: 8px 10px; margin-bottom: 16px; line-height: 1.6; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+.modal-actions button { padding: 8px 24px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; font-family: var(--font-sans); transition: all .2s; }
+.btn-confirm { background: var(--up); color: #fff; }
+.btn-confirm:hover { filter: brightness(1.15); }
+.btn-cancel { background: var(--bg-tertiary); color: var(--text-2); border: 1px solid var(--border); }
+.btn-cancel:hover { border-color: var(--text-2); }
+.modal-card.trading-card { width: 600px; }
+.trade-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+.trade-form .modal-input-group { margin-bottom: 0; }
+.trade-positions { max-height: 160px; overflow-y: auto; }
+.trade-positions table { font-size: 11px; }
+.trade-positions th { padding: 6px 8px; font-size: 10px; }
+.trade-positions td { padding: 5px 8px; }
+
+/* === STATUS BAR === */
+.sb-left { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.sb-status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--down); animation: pulse 2s infinite; }
+.ticker-wrap { flex: 1; overflow: hidden; position: relative; height: 100%; display: flex; align-items: center; margin: 0 12px; }
+.ticker-track { display: flex; white-space: nowrap; animation: ticker-scroll 60s linear infinite; gap: 40px; }
+.ticker-item { color: var(--text-3); font-size: 11px; }
+.ticker-item .t-label { color: var(--text-2); margin-right: 4px; }
+.sb-right { flex-shrink: 0; font-family: var(--font-mono); font-size: 11px; display: flex; gap: 14px; }
+
+/* === ANIMATIONS === */
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+@keyframes glow-pulse { 0%,100% { box-shadow: 0 0 4px rgba(239,68,68,.3); } 50% { box-shadow: 0 0 12px rgba(239,68,68,.6); } }
+@keyframes modal-in { from { opacity: 0; transform: scale(.95) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+@keyframes ticker-scroll { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+@keyframes flash-up { from { background: var(--up-bg); } to { background: transparent; } }
+@keyframes flash-down { from { background: var(--down-bg); } to { background: transparent; } }
+@keyframes row-in { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes scan { 0% { top: 0; } 100% { top: 100%; } }
+.flash-up { animation: flash-up .8s ease; }
+.flash-down { animation: flash-down .8s ease; }
+.header::after { content:''; position:absolute; left:0; right:0; bottom:0; height:1px; background:linear-gradient(90deg, transparent, var(--accent), var(--up), var(--gold), var(--accent), transparent); opacity:.4; }
+.header { position: relative; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="header" id="header">
+  <div class="h-left">
+    <span class="h-logo">AI智能竞价选股系统</span>
+    <span class="h-ver">v2.0</span>
+  </div>
+  <div class="h-center">
+    <div class="h-status"><span class="h-dot" id="dataSourceDot"></span><span id="dataSourceText">数据源</span></div>
+    <div class="h-status"><span class="h-dot on"></span><span>策略引擎</span></div>
+    <div class="h-status"><span class="h-dot warn" id="tradeConnDot"></span><span id="tradeConnText">交易通道</span></div>
+    <div style="display:flex;align-items:center;gap:4px;margin-left:8px;cursor:pointer;user-select:none" onclick="toggleDataMode()" title="切换实时/模拟数据">
+      <span style="font-size:10px;color:var(--text-2)" id="dataModeLabel">模拟</span>
+      <div id="dataModeSwitch" style="width:32px;height:16px;border-radius:8px;background:var(--border-hl);position:relative;transition:background .3s">
+        <div id="dataModeKnob" style="width:12px;height:12px;border-radius:50%;background:var(--text-2);position:absolute;top:2px;left:2px;transition:left .3s,background .3s"></div>
+      </div>
+    </div>
+    <span class="h-phase auction" id="marketPhase">竞价阶段</span>
+  </div>
+  <div class="h-right">
+    <span class="h-date" id="dateDisplay"></span>
+    <span class="h-clock" id="clockDisplay">09:25:00</span>
+    <button class="h-btn" onclick="toggleTradingPanel()">💹 交易面板</button>
+  </div>
+</header>
+
+<!-- MAIN LAYOUT -->
+<div class="app-layout">
+  <!-- LEFT SIDEBAR: Strategy Config -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sb-section">
+      <div class="sb-title">选股策略（阶段式流水线 v3）</div>
+      <div class="sb-item"><label><span>竞价异动扫描</span></label><div class="toggle active" data-key="bidAnalysis" onclick="toggleStrategy(this)"></div></div>
+      <div class="sb-item"><label><span>趋势动量过滤</span></label><div class="toggle active" data-key="trendMomentum" onclick="toggleStrategy(this)"></div></div>
+      <div class="sb-item"><label><span>事件催化检测</span></label><div class="toggle active" data-key="eventCatalyst" onclick="toggleStrategy(this)"></div></div>
+      <div class="sb-item"><label><span>板块热度联动</span></label><div class="toggle active" data-key="sectorHeat" onclick="toggleStrategy(this)"></div></div>
+      <div class="sb-item"><label><span>主力资金追踪</span></label><div class="toggle active" data-key="capitalFlow" onclick="toggleStrategy(this)"></div></div>
+      <div class="sb-item"><label><span>多信号密度评估</span></label><div class="toggle active" data-key="crossConfirm" onclick="toggleStrategy(this)"></div></div>
+      <div class="sb-item"><label><span>AI综合评分</span></label><div class="toggle active" data-key="aiScore" onclick="toggleStrategy(this)"></div></div>
+    </div>
+    <div class="sb-section">
+      <div class="sb-title">参数设置</div>
+      <div class="sb-slider-group">
+        <div class="sb-slider-label"><span>AI评分阈值</span><span id="thresholdVal">70</span></div>
+        <input type="range" class="sb-slider" min="30" max="95" value="70" oninput="document.getElementById('thresholdVal').textContent=this.value;filterByThreshold()">
+      </div>
+      <div class="sb-slider-group" style="margin-top:12px">
+        <div class="sb-slider-label"><span>精选数量（只）</span><span id="maxSignalsVal">5</span></div>
+        <input type="range" class="sb-slider" min="1" max="10" value="5" oninput="document.getElementById('maxSignalsVal').textContent=this.value;filterByThreshold()">
+      </div>
+      <div class="sb-slider-group" style="margin-top:12px">
+        <div class="sb-slider-label"><span>最低量比</span><span id="volRatioVal">0.5</span></div>
+        <input type="range" class="sb-slider" min="0" max="50" value="5" oninput="document.getElementById('volRatioVal').textContent=(this.value/10).toFixed(1);filterByThreshold()">
+      </div>
+      <div class="sb-slider-group" style="margin-top:12px">
+        <div class="sb-slider-label"><span>最大市值(亿)</span><span id="capVal">2000</span></div>
+        <input type="range" class="sb-slider" min="10" max="2000" value="2000" step="10" oninput="document.getElementById('capVal').textContent=this.value;filterByThreshold()">
+      </div>
+    </div>
+    <div class="sb-section">
+      <div class="sb-title">过滤条件</div>
+      <div class="sb-item"><label><span>排除ST股</span></label><div class="toggle active" data-key="excludeST" onclick="toggleStrategy(this)"></div></div>
+      <div class="sb-item"><label><span>仅限融资融券</span></label><div class="toggle" data-key="marginOnly" onclick="toggleStrategy(this)"></div></div>
+      <div class="sb-item"><label><span>排除次新股</span></label><div class="toggle" data-key="excludeNew" onclick="toggleStrategy(this)"></div></div>
+    </div>
+    <div class="sb-section" style="margin-top:auto">
+      <button class="sb-btn primary" onclick="startSelection()">开 始 选 股</button>
+      <button class="sb-btn secondary" onclick="resetFilters()">重置条件</button>
+    </div>
+  </aside>
+
+  <!-- CENTER: Signal Table -->
+  <main class="main-area" id="mainArea">
+    <div class="table-toolbar">
+      <input class="search-box" placeholder="搜索股票代码/名称... (输入6位代码回车查询)" id="searchInput" oninput="onSearchInput()" onkeydown="if(event.key==='Enter')filterStocks()">
+      <span class="chip active" data-filter="all" onclick="setFilter(this,'all')">全部</span>
+      <span class="chip" data-filter="strongBuy" onclick="setFilter(this,'strongBuy')">强烈推荐</span>
+      <span class="chip" data-filter="buy" onclick="setFilter(this,'buy')">推荐买入</span>
+      <span class="chip" data-filter="sector" onclick="setFilter(this,'sector')">板块强势</span>
+      <div class="tb-right">
+        <span class="tb-count" id="signalCount">信号: 0</span>
+        <button class="h-btn" onclick="refreshData()">刷新</button>
+      </div>
+    </div>
+    <div class="capital-flow-bar" id="capitalFlowBar">
+      <span class="cfb-label">[ 资金流入板块 ]</span>
+      <span class="cfb-sectors" id="cfbSectors"></span>
+    </div>
+    <div class="table-scroll" id="tableScroll">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:30px">☐</th>
+            <th style="width:36px">#</th>
+            <th data-sort="sectorStr" onclick="sortTable('sectorStr')">板块力度</th>
+            <th data-sort="code" onclick="sortTable('code')">股票代码</th>
+            <th data-sort="name" onclick="sortTable('name')">名称</th>
+            <th data-sort="industry" onclick="sortTable('industry')">行业</th>
+            <th data-sort="aiScore" onclick="sortTable('aiScore')">AI评分 <span class="sort-arrow">▼</span></th>
+            <th data-sort="change" onclick="sortTable('change')">竞价涨幅%</th>
+            <th data-sort="volRatio" onclick="sortTable('volRatio')">量比</th>
+            <th data-sort="capitalFlow" onclick="sortTable('capitalFlow')">资金流向</th>
+            <th data-sort="signalCount" onclick="sortTable('signalCount')">信号数</th>
+            <th style="width:80px">信号强度</th>
+            <th data-sort="time" onclick="sortTable('time')">接收时间</th>
+            <th style="width:50px">操作</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody">
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <!-- RIGHT: AI Panel -->
+  <aside class="ai-panel" id="aiPanel">
+    <div class="ai-header">
+      <div class="ai-stock-name" id="aiStockName">选择股票查看详情</div>
+      <div class="ai-stock-code" id="aiStockCode">--</div>
+    </div>
+    <div class="ai-score-big" id="aiScoreBig" style="color:var(--text-3)">--</div>
+    <div class="ai-rec" id="aiRec"></div>
+    <div class="radar-wrap" id="radarWrap"></div>
+    <div class="ai-dims" id="aiDims"></div>
+    <div class="ai-section">
+      <div class="ai-section-title">详细指标</div>
+      <div id="aiDetails"></div>
+    </div>
+    <div class="ai-section">
+      <div class="ai-section-title">最新信号日志</div>
+      <div class="ai-log" id="aiLog"></div>
+    </div>
+  </aside>
+</div>
+
+<!-- BOTTOM STATUS BAR -->
+<footer class="status-bar" id="statusBar">
+  <div class="sb-left"><span class="sb-status-dot"></span><span id="sbStatus">系统状态: 初始化...</span></div>
+  <div class="ticker-wrap">
+    <div class="ticker-track" id="tickerTrack"></div>
+  </div>
+  <div class="sb-right">
+    <span id="sbStrategy">策略: 竞价异动 | 趋势动量 | 事件催化 | 信号密度 | 宁缺毋滥</span>
+    <span id="sbTime"></span>
+  </div>
+</footer>
+
+<!-- AUTO-BUY MODAL -->
+<div class="modal-overlay" id="autoBuyModal">
+  <div class="modal-card">
+    <h3><span class="modal-warn-icon">⚠</span>自动买入确认</h3>
+    <div class="modal-info" id="modalStockInfo"></div>
+    <div class="modal-input-group">
+      <label>买入数量（手）</label>
+      <input class="modal-input" type="number" id="modalQty" value="1" min="1" step="1">
+    </div>
+    <div class="modal-disclaimer">
+      ⚠ 风险提示：自动买入将以竞价结果价格委托市价单。股市有风险，投资需谨慎。本系统AI评分仅供参考，不构成投资建议。请确认已知悉相关风险。
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="hideModal('autoBuyModal')">取 消</button>
+      <button class="btn-confirm" id="modalConfirmBtn" onclick="confirmAutoBuy()">确 认 买 入</button>
+    </div>
+  </div>
+</div>
+
+<!-- TRADING PANEL MODAL -->
+<div class="modal-overlay" id="tradingModal">
+  <div class="modal-card trading-card">
+    <h3>💹 交易面板 — 通达信接口 <span style="font-size:11px;color:var(--text-3);font-weight:400;margin-left:auto">预留对接</span></h3>
+    <div class="modal-info">
+      <div class="modal-info-row"><span class="lbl">交易账户</span><span style="color:var(--gold)">模拟账户 (DEMO)</span></div>
+      <div class="modal-info-row"><span class="lbl">可用资金</span><span id="tradeBalance" style="color:var(--up)">¥ 1,000,000.00</span></div>
+      <div class="modal-info-row"><span class="lbl">今日盈亏</span><span id="tradePnl" class="text-up">+¥ 0.00</span></div>
+      <div class="modal-info-row"><span class="lbl">通达信状态</span><span><span class="h-dot warn" style="display:inline-block;vertical-align:middle;margin-right:4px"></span>待连接</span></div>
+    </div>
+    <h3 style="font-size:14px;margin-bottom:12px">委托下单</h3>
+    <div class="trade-form">
+      <div class="modal-input-group"><label>股票代码</label><input class="modal-input" id="tradeCode" placeholder="输入代码"></div>
+      <div class="modal-input-group"><label>委托价格</label><input class="modal-input" id="tradePrice" type="number" step="0.01" placeholder="0.00"></div>
+      <div class="modal-input-group"><label>买入数量(股)</label><input class="modal-input" id="tradeQty" type="number" value="100" step="100"></div>
+      <div class="modal-input-group"><label>委托方式</label>
+        <select class="modal-input" id="tradeType" style="font-family:var(--font-sans)">
+          <option>限价委托</option><option>市价委托</option><option>最优五档</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-actions" style="margin-bottom:16px">
+      <button class="btn-cancel" onclick="hideModal('tradingModal')">关 闭</button>
+      <button class="btn-confirm" onclick="simulateTrade()">确 认 委 托</button>
+    </div>
+    <h3 style="font-size:14px;margin-bottom:8px">当前持仓</h3>
+    <div class="trade-positions">
+      <table>
+        <thead><tr><th>代码</th><th>名称</th><th>持仓</th><th>成本</th><th>现价</th><th>盈亏</th></tr></thead>
+        <tbody id="positionsBody"><tr><td colspan="6" style="color:var(--text-3);text-align:center;padding:20px">暂无持仓</td></tr></tbody>
+      </table>
+    </div>
+    <div class="ai-section" style="border-top:1px solid var(--border);margin-top:16px;padding:12px 0 0">
+      <div class="ai-section-title">通达信/券商API配置（预留）</div>
+      <div class="trade-form" style="margin-bottom:0">
+        <div class="modal-input-group"><label>TDX服务器地址</label><input class="modal-input" placeholder="127.0.0.1:7727" disabled></div>
+        <div class="modal-input-group"><label>券商账号</label><input class="modal-input" placeholder="待配置" disabled></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ========================================
+// CONFIG & CONSTANTS
+// ========================================
+const SECTORS = ['半导体','新能源','医药生物','白酒','银行','地产','军工','AI概念','机器人','汽车','消费电子','光伏','储能','芯片','传媒','游戏'];
+const INDUSTRIES = {
+  '半导体': ['半导体制造','芯片设计','封测','半导体设备','EDA'],
+  '新能源': ['锂电池','光伏组件','风电','储能系统','充电桩'],
+  '医药生物': ['创新药','CXO','医疗器械','中药','疫苗'],
+  '白酒': ['高端白酒','次高端白酒','区域白酒'],
+  '银行': ['国有大行','股份行','城商行'],
+  '地产': ['房地产开发','物业管理','房地产服务'],
+  '军工': ['航空装备','航天装备','军工电子','船舶'],
+  'AI概念': ['大模型','算力','AI应用','数据要素','智能驾驶'],
+  '机器人': ['人形机器人','工业机器人','减速器','伺服系统'],
+  '汽车': ['整车制造','汽车零部件','智能座舱'],
+  '消费电子': ['消费电子组件','光学元件','LED','面板'],
+  '光伏': ['硅料','电池片','逆变器','光伏玻璃'],
+  '储能': ['储能电池','PCS','温控','BMS'],
+  '芯片': ['GPU','CPU','FPGA','存储芯片','模拟芯片'],
+  '传媒': ['影视','广告','出版','数字媒体'],
+  '游戏': ['手游','端游','游戏出海','云游戏']
+};
+
+const STOCK_POOL = [
+  {code:'300773',name:'拉卡拉',sector:'AI概念',margin:true},
+  {code:'688048',name:'长光华芯',sector:'半导体',margin:true},
+  {code:'688195',name:'腾景科技',sector:'消费电子',margin:true},
+  {code:'300136',name:'信维通信',sector:'消费电子',margin:true},
+  {code:'300783',name:'三只松鼠',sector:'消费电子',margin:true},
+  {code:'600519',name:'贵州茅台',sector:'白酒',margin:true},
+  {code:'000858',name:'五粮液',sector:'白酒',margin:true},
+  {code:'002475',name:'立讯精密',sector:'消费电子',margin:true},
+  {code:'300750',name:'宁德时代',sector:'新能源',margin:true},
+  {code:'688981',name:'中芯国际',sector:'半导体',margin:true},
+  {code:'002594',name:'比亚迪',sector:'汽车',margin:true},
+  {code:'000725',name:'京东方A',sector:'消费电子',margin:true},
+  {code:'300059',name:'东方财富',sector:'AI概念',margin:true},
+  {code:'688256',name:'寒武纪',sector:'芯片',margin:true},
+  {code:'002371',name:'北方华创',sector:'半导体',margin:true},
+  {code:'300124',name:'汇川技术',sector:'机器人',margin:true},
+  {code:'002049',name:'紫光国微',sector:'芯片',margin:true},
+  {code:'600036',name:'招商银行',sector:'银行',margin:true},
+  {code:'601012',name:'隆基绿能',sector:'光伏',margin:true},
+  {code:'688185',name:'康希诺',sector:'医药生物',margin:false},
+  {code:'300274',name:'阳光电源',sector:'光伏',margin:true},
+  {code:'300308',name:'中际旭创',sector:'AI概念',margin:true},
+  {code:'002415',name:'海康威视',sector:'AI概念',margin:true},
+  {code:'688396',name:'华润微',sector:'半导体',margin:true},
+  {code:'300496',name:'中科创达',sector:'AI概念',margin:true},
+  {code:'002916',name:'深南电路',sector:'芯片',margin:true},
+  {code:'300418',name:'昆仑万维',sector:'AI概念',margin:true},
+  {code:'688111',name:'金山办公',sector:'AI概念',margin:false},
+  {code:'603259',name:'药明康德',sector:'医药生物',margin:true},
+  {code:'300760',name:'迈瑞医疗',sector:'医药生物',margin:true},
+  {code:'600900',name:'长江电力',sector:'新能源',margin:true},
+  {code:'601127',name:'赛力斯',sector:'汽车',margin:true},
+  {code:'002812',name:'恩捷股份',sector:'新能源',margin:true},
+  {code:'300893',name:'松原股份',sector:'汽车',margin:false},
+  {code:'688012',name:'中微公司',sector:'半导体',margin:true},
+];
+
+const NEWS = [
+  '【快讯】央行今日开展1500亿元逆回购操作，维护流动性合理充裕',
+  '【板块】半导体板块早盘集体走强，多只个股竞价涨停',
+  '【数据】北向资金早盘净流入超35亿元，加仓AI概念股',
+  '【政策】工信部发布新一代人工智能产业发展行动计划',
+  '【市场】两市竞价成交额突破800亿，市场情绪回暖',
+  '【研报】机构看好2026年半导体国产替代主线投资机会',
+  '【消息】多家券商上调A股全年盈利预测，维持看好评级',
+  '【热点】人形机器人概念持续活跃，产业链加速落地',
+  '【资金】主力资金早盘大幅流入新能源赛道，关注储能方向',
+  '【技术】ChatGPT-5发布在即，AI应用端迎来催化',
+  '【外盘】隔夜美股三大指数齐涨，纳斯达克创历史新高',
+  '【宏观】一季度GDP同比增长5.4%，超市场预期',
+];
+
+// ========================================
+// STATE
+// ========================================
+const State = {
+  stocks: [],
+  filtered: [],
+  selectedCode: null,
+  sortCol: 'aiScore',
+  sortDir: 'desc',
+  filterMode: 'all',
+  searchQuery: '',
+  positions: [],
+  balance: 1000000,
+  modalStock: null,
+  strategies: { bidAnalysis:true, trendMomentum:true, eventCatalyst:true, sectorHeat:true, capitalFlow:true, crossConfirm:true, aiScore:true, excludeST:true, marginOnly:false, excludeNew:false },
+  capitalFlowSectors: [],
+  dataMode: 'mock', // 'mock' or 'live'
+  apiBase: '',  // same origin — backend serves both HTML and API
+  apiConnected: false,
+  lastApiTs: null,
+};
+
+// ========================================
+// LIVE DATA API
+// ========================================
+async function fetchLiveStocks(){
+  const thres = parseInt(document.getElementById('thresholdVal')?.textContent||'70');
+  const minVol = parseFloat(document.getElementById('volRatioVal')?.textContent||'1.0');
+  const params = new URLSearchParams({
+    min_change: '0.5',
+    max_change: '20',
+    min_vol_ratio: minVol.toString(),
+    min_price: '3',
+    max_price: '300',
+    exclude_st: State.strategies.excludeST?'true':'false',
+    exclude_limit_up: 'true',
+    top_n: '50',
+  });
+  try {
+    const r = await fetch(`${State.apiBase}/api/stocks?${params}`, {signal: AbortSignal.timeout(15000)});
+    const d = await r.json();
+    if(d.success && d.data){
+      State.apiConnected = true;
+      State.lastApiTs = d.timestamp;
+      updateConnStatus(true, `实时 (${d.count}只)`);
+      // merge autoBuy state from current stocks
+      const abMap = {};
+      State.stocks.forEach(s=>{if(s.autoBuy) abMap[s.code]=true;});
+      d.data.forEach(s=>{s.autoBuy=!!abMap[s.code]; s.selected=s.code===State.selectedCode;});
+      return d.data;
+    }
+    return null;
+  } catch(e){
+    console.warn('[API] fetchLiveStocks failed:', e);
+    State.apiConnected = false;
+    updateConnStatus(false, '连接失败');
+    return null;
+  }
+}
+
+async function fetchLiveSectors(){
+  try {
+    const r = await fetch(`${State.apiBase}/api/sectors`, {signal: AbortSignal.timeout(10000)});
+    const d = await r.json();
+    if(d.success) return d.data;
+    return null;
+  } catch(e){
+    console.warn('[API] fetchLiveSectors failed:', e);
+    return null;
+  }
+}
+
+async function checkApiHealth(){
+  try {
+    const r = await fetch(`${State.apiBase}/api/health`, {signal: AbortSignal.timeout(5000)});
+    const d = await r.json();
+    return d.status === 'ok';
+  } catch(e){
+    return false;
+  }
+}
+
+function updateConnStatus(connected, label){
+  const dot = document.getElementById('dataSourceDot');
+  const txt = document.getElementById('dataSourceText');
+  if(connected){
+    dot.className = 'h-dot on';
+    txt.textContent = label || '实时数据';
+  } else {
+    dot.className = 'h-dot off';
+    txt.textContent = label || '未连接';
+  }
+  // status bar
+  const sbDot = document.querySelector('.sb-status-dot');
+  const sbTxt = document.getElementById('sbStatus');
+  if(sbDot && sbTxt){
+    sbDot.style.background = connected? 'var(--down)' : '#555';
+    sbTxt.textContent = connected? `系统状态: ${State.dataMode==='live'?'实时接入':'模拟运行'}` : '系统状态: 数据源断开';
+  }
+}
+
+function toggleDataMode(){
+  State.dataMode = State.dataMode==='live'?'mock':'live';
+  const knob = document.getElementById('dataModeKnob');
+  const sw = document.getElementById('dataModeSwitch');
+  const label = document.getElementById('dataModeLabel');
+  if(State.dataMode==='live'){
+    knob.style.left = '18px';
+    knob.style.background = 'var(--down)';
+    sw.style.background = 'rgba(34,197,94,.3)';
+    label.textContent = '实时';
+    label.style.color = 'var(--down)';
+    // immediately fetch live data
+    startSelection();
+  } else {
+    knob.style.left = '2px';
+    knob.style.background = 'var(--text-2)';
+    sw.style.background = 'var(--border-hl)';
+    label.textContent = '模拟';
+    label.style.color = 'var(--text-2)';
+    updateConnStatus(false, '模拟模式');
+    startSelection();
+  }
+}
+
+// ========================================
+// DATA ENGINE
+// ========================================
+function rand(a,b){ return a+Math.random()*(b-a); }
+function randInt(a,b){ return Math.floor(rand(a,b+1)); }
+function pick(arr){ return arr[randInt(0,arr.length-1)]; }
+function clamp(v,lo,hi){ return Math.max(lo,Math.min(hi,v)); }
+function gaussRand(){ let u=0,v=0; while(!u)u=Math.random(); while(!v)v=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); }
+
+function generateStockData(){
+  const count = randInt(18,28);
+  const pool = [...STOCK_POOL].sort(()=>Math.random()-.5).slice(0,count);
+  const sectorHeat = {};
+  SECTORS.forEach(s=> sectorHeat[s]=rand(20,100));
+  // boost some sectors
+  const hotSectors = [...SECTORS].sort(()=>Math.random()-.5).slice(0,3);
+  hotSectors.forEach(s=> sectorHeat[s]=rand(75,98));
+
+  // update capital flow sectors display
+  State.capitalFlowSectors = hotSectors;
+
+  return pool.map((s,i)=>{
+    const prevClose = rand(8,180);
+    const changePct = clamp(rand(-2,10)+gaussRand()*2, -10, 10);
+    const price = +(prevClose*(1+changePct/100)).toFixed(2);
+    const volRatio = +(rand(0.5,6)+Math.max(0,gaussRand())).toFixed(2);
+    const bidVol = randInt(500,80000);
+    const bidAmt = +(bidVol*price/10000).toFixed(1);
+    const turnover = +rand(0.3,12).toFixed(2);
+    const floatCap = +rand(15,450).toFixed(0);
+    const sHeat = sectorHeat[s.sector]||50;
+    const industry = pick(INDUSTRIES[s.sector]||[s.sector]);
+    // 信号接收时间：09:30-09:35（竞价+开盘前5分钟验证窗口）
+    const tMin = randInt(30,35);
+    const tSec = randInt(0,59);
+    const time = `09:${tMin}:${tSec<10?'0'+tSec:tSec}`;
+
+    // === 趋势动量数据（模拟近期行情） ===
+    const recentGainPct = +(rand(-8,35)+gaussRand()*5).toFixed(2); // 近3日涨幅
+    const consecutiveUp = recentGainPct>20?randInt(3,5):recentGainPct>10?randInt(2,3):recentGainPct>3?randInt(1,2):0;
+
+    // === 事件催化强度（模拟突发利好/政策/业绩催化） ===
+    // 随机分配事件催化：大部分股票无事件，少数有强催化
+    const hasEvent = Math.random()<0.25; // 25%概率有事件催化
+    const eventCatalyst = hasEvent ? clamp(+(rand(50,98)+gaussRand()*5).toFixed(0),40,100) : clamp(+(rand(10,45)+gaussRand()*5).toFixed(0),0,55);
+
+    // === 多维度AI评分（青云量化 v3 阶段式流水线模型） ===
+
+    // Stage 1: 竞价异动扫描 — 量比突变 + 竞价涨幅 → 异动信号强度
+    const volSpike = volRatio>=3?25:volRatio>=2?15:volRatio>=1.5?8:0;
+    const auctionAnomaly = clamp(+(volRatio*13+Math.max(0,changePct)*5+volSpike+rand(5,15)).toFixed(0),0,100);
+
+    // Stage 2: 趋势动量过滤 — 近期涨幅+连板天数 → 动量得分
+    const trendMomentum = clamp(+(recentGainPct*1.8+consecutiveUp*14+rand(5,18)).toFixed(0),0,100);
+
+    // Stage 3: 基础维度评估
+    const sectorHeatDim = +clamp(sHeat+rand(-5,10),0,100).toFixed(0);
+    const capitalFlowDim = +clamp(rand(30,90)+gaussRand()*10,0,100).toFixed(0);
+    const techPatternDim = +clamp(rand(35,92)+gaussRand()*8,0,100).toFixed(0);
+    const sentimentDim = +clamp(rand(45,88)+gaussRand()*5,0,100).toFixed(0);
+
+    // Stage 4: 多信号采集 — 每类信号可贡献1-3个独立信号，总计4-12
+    let sigCount = 0;
+    // ① 量价异动信号（量比、换手、振幅）
+    if(auctionAnomaly>=80) sigCount+=3; else if(auctionAnomaly>=60) sigCount+=2; else if(auctionAnomaly>=40) sigCount+=1;
+    // ② 趋势动量信号（近N日涨幅、连板）
+    if(trendMomentum>=75) sigCount+=2; else if(trendMomentum>=50) sigCount+=1;
+    // ③ 板块共振信号
+    if(sectorHeatDim>=75) sigCount+=2; else if(sectorHeatDim>=55) sigCount+=1;
+    // ④ 事件催化信号（政策/地缘/业绩）
+    if(eventCatalyst>=80) sigCount+=2; else if(eventCatalyst>=55) sigCount+=1;
+    // ⑤ 资金异动信号（主力流入）
+    if(capitalFlowDim>=70) sigCount+=1;
+    // ⑥ 技术形态信号（支撑/突破）
+    if(techPatternDim>=65) sigCount+=1;
+    // ⑦ 市场情绪信号
+    if(sentimentDim>=70) sigCount+=1;
+    const signalCount = clamp(sigCount, 0, 12);
+
+    // Stage 5: 交叉确认 — 统计通过阈值的维度数（含事件催化）
+    let passCount = 0;
+    if(auctionAnomaly>=60) passCount++;
+    if(trendMomentum>=55) passCount++;
+    if(sectorHeatDim>=60) passCount++;
+    if(capitalFlowDim>=55) passCount++;
+    if(techPatternDim>=55) passCount++;
+    if(sentimentDim>=60) passCount++;
+    if(eventCatalyst>=55) passCount++;
+
+    // Stage 6: 综合评分（7维权重 + 信号密度加分 + 独立行情加分）
+    const baseScore = auctionAnomaly*.22+trendMomentum*.18+eventCatalyst*.16+sectorHeatDim*.12+capitalFlowDim*.12+techPatternDim*.10+sentimentDim*.10;
+    // 信号密度加分（基于实际信号数量）
+    const densityBonus = signalCount>=10?15:signalCount>=8?10:signalCount>=6?6:signalCount>=4?3:0;
+    // 独立行情加分：竞价异动极强+动量/事件极强，可覆盖板块弱
+    const indyBonus = (auctionAnomaly>=78&&(trendMomentum>=72||eventCatalyst>=75))?8:(auctionAnomaly>=65&&(trendMomentum>=60||eventCatalyst>=60))?4:0;
+    const aiScore = clamp(Math.round(baseScore+densityBonus+indyBonus),5,99);
+
+    const dims = {
+      auctionAnomaly,
+      trendMomentum,
+      eventCatalyst,
+      sectorHeat: sectorHeatDim,
+      capitalFlow: capitalFlowDim,
+      techPattern: techPatternDim,
+      sentiment: sentimentDim,
+    };
+
+    const sectorStr = sHeat>=70?'强':sHeat>=45?'中':'弱';
+    const capitalFlowVal = +(rand(-5000,8000)).toFixed(0);
+
+    return {
+      code: s.code, name: s.name, sector: s.sector, industry, margin: s.margin,
+      prevClose, price, change: +changePct.toFixed(2), volRatio, bidVol, bidAmt,
+      turnover, floatCap: +floatCap, sectorStr, capitalFlow: capitalFlowVal,
+      recentGainPct: +recentGainPct, consecutiveUp, passCount,
+      dims, aiScore: clamp(aiScore,5,99), signalCount, time,
+      autoBuy: false, selected: false,
+    };
+  }).sort((a,b)=>b.aiScore-a.aiScore);
+}
+
+function getSignalLabel(score){
+  if(score>=85) return {text:'强烈推荐',cls:'signal-strong-buy'};
+  if(score>=70) return {text:'推荐买入',cls:'signal-buy'};
+  if(score>=50) return {text:'观望',cls:'signal-watch'};
+  return {text:'回避',cls:'signal-avoid'};
+}
+function getScoreColor(score){
+  if(score>=85) return 'var(--up)';
+  if(score>=70) return 'var(--gold)';
+  if(score>=50) return 'var(--accent)';
+  return 'var(--text-3)';
+}
+function getDimColor(val){
+  if(val>=75) return 'var(--up)';
+  if(val>=55) return 'var(--gold)';
+  if(val>=35) return 'var(--accent)';
+  return 'var(--text-3)';
+}
+function fmtNum(n){ return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g,','); }
+
+// ========================================
+// RENDERING
+// ========================================
+function applyFilters(){
+  let list = [...State.stocks];
+  if(State.searchQuery){
+    const q = State.searchQuery.toLowerCase();
+    list = list.filter(s=>s.code.includes(q)||s.name.includes(q));
+  }
+  if(State.filterMode==='strongBuy') list=list.filter(s=>s.aiScore>=85);
+  else if(State.filterMode==='buy') list=list.filter(s=>s.aiScore>=70);
+  else if(State.filterMode==='sector') list=list.filter(s=>s.sectorStr==='强');
+
+  const thres = parseInt(document.getElementById('thresholdVal')?.textContent||'70');
+  const minVol = parseFloat(document.getElementById('volRatioVal')?.textContent||'1.0');
+  const maxCap = parseInt(document.getElementById('capVal')?.textContent||'500');
+  list = list.filter(s=>s.aiScore>=thres&&s.volRatio>=minVol&&s.floatCap<=maxCap);
+
+  // sort
+  const col = State.sortCol;
+  const dir = State.sortDir==='asc'?1:-1;
+  list.sort((a,b)=>{
+    let va=a[col], vb=b[col];
+    if(typeof va==='string') return va.localeCompare(vb)*dir;
+    return (va-vb)*dir;
+  });
+  // 精准筛选：只保留最强的前N只（默认5）
+  const maxSignals = parseInt(document.getElementById('maxSignalsVal')?.textContent||'5');
+  list = list.slice(0, maxSignals);
+  State.filtered = list;
+}
+
+function renderTable(){
+  applyFilters();
+  const body = document.getElementById('tableBody');
+  document.getElementById('signalCount').textContent = `信号: ${State.filtered.length}`;
+
+  if(!State.filtered.length){
+    body.innerHTML='<tr><td colspan="14" style="color:var(--text-3);padding:40px;text-align:center">暂无符合条件的信号</td></tr>';
+    return;
+  }
+
+  body.innerHTML = State.filtered.map((s,i)=>{
+    const sig = getSignalLabel(s.aiScore);
+    const chgCls = s.change>0?'text-up':s.change<0?'text-down':'text-flat';
+    const chgPrefix = s.change>0?'+':'';
+    const flowCls = s.capitalFlow>0?'text-up':'text-down';
+    const flowPrefix = s.capitalFlow>0?'+':'';
+    const strengthPct = Math.min(100, s.signalCount/12*100);
+    // 信号强度三级分色：白(≥10) > 橙(5-9) > 黄(≤4)，匹配青云量化视觉
+    const barColor = s.signalCount>=10?'#fff':s.signalCount>=5?'var(--warn)':'var(--gold)';
+    const isTop = i===0;
+    const isSelected = s.code===State.selectedCode;
+    const badgeCls = s.sectorStr==='强'?'badge-strong':s.sectorStr==='中'?'badge-mid':'badge-weak';
+    const marginTag = s.margin?'(融)':'';
+
+    return `<tr class="${isTop?'top-signal':''} ${isSelected?'selected':''}" onclick="selectStock('${s.code}')" style="animation:row-in .3s ease ${i*30}ms both">
+      <td class="checkbox-cell"><input type="checkbox" class="cb" ${s.autoBuy?'checked':''} onclick="event.stopPropagation();toggleAutoBuy('${s.code}',this)"></td>
+      <td style="color:var(--text-3)">${i+1}</td>
+      <td><span class="badge ${badgeCls}">${s.sectorStr}</span></td>
+      <td class="code-cell">${s.code}<span style="color:var(--text-3);font-size:10px">${marginTag}</span></td>
+      <td class="name-cell">${s.name}</td>
+      <td class="sector-cell" style="font-size:11px;color:var(--text-2)">${s.industry}</td>
+      <td class="ai-score" style="color:${getScoreColor(s.aiScore)}">${s.aiScore}</td>
+      <td class="${chgCls}">${chgPrefix}${s.change.toFixed(2)}%</td>
+      <td style="color:${s.volRatio>=2?'var(--gold)':'var(--text-1)'}">${s.volRatio}</td>
+      <td class="${flowCls}" style="font-size:11px">${flowPrefix}${fmtNum(s.capitalFlow)}万</td>
+      <td>${s.signalCount}</td>
+      <td><div class="signal-bar"><div class="signal-bar-fill" style="width:${strengthPct}%;background:${barColor}"></div></div></td>
+      <td style="font-size:11px;color:var(--text-2)">${s.time}</td>
+      <td><button class="buy-btn" onclick="event.stopPropagation();openBuyModal('${s.code}')">买入</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function renderRadarChart(dims){
+  const labels = ['竞价异动','趋势动量','事件催化','板块热度','资金流入','技术形态','市场情绪'];
+  const values = [dims.auctionAnomaly, dims.trendMomentum, dims.eventCatalyst, dims.sectorHeat, dims.capitalFlow, dims.techPattern, dims.sentiment];
+  const cx=110,cy=105,maxR=58,n=7;
+  let svg = '<svg viewBox="0 0 220 210" class="radar-chart">';
+
+  // guide polygons
+  for(const lv of [.33,.66,1]){
+    const pts=[];
+    for(let i=0;i<n;i++){
+      const a=(Math.PI*2*i/n)-Math.PI/2;
+      pts.push(`${cx+maxR*lv*Math.cos(a)},${cy+maxR*lv*Math.sin(a)}`);
+    }
+    svg+=`<polygon points="${pts.join(' ')}" class="radar-guide"/>`;
+  }
+  // axes
+  for(let i=0;i<n;i++){
+    const a=(Math.PI*2*i/n)-Math.PI/2;
+    svg+=`<line x1="${cx}" y1="${cy}" x2="${cx+maxR*Math.cos(a)}" y2="${cy+maxR*Math.sin(a)}" class="radar-axis"/>`;
+  }
+  // data polygon
+  const dpts=values.map((v,i)=>{
+    const a=(Math.PI*2*i/n)-Math.PI/2;
+    const r=maxR*(v/100);
+    return `${cx+r*Math.cos(a)},${cy+r*Math.sin(a)}`;
+  });
+  svg+=`<polygon points="${dpts.join(' ')}" class="radar-data"/>`;
+  // dots
+  dpts.forEach(p=>{
+    const [x,y]=p.split(',');
+    svg+=`<circle cx="${x}" cy="${y}" r="3" class="radar-dot"/>`;
+  });
+  // labels
+  labels.forEach((lb,i)=>{
+    const a=(Math.PI*2*i/n)-Math.PI/2;
+    const lx=cx+(maxR+20)*Math.cos(a);
+    const ly=cy+(maxR+20)*Math.sin(a);
+    const anchor=lx<90?'end':lx>110?'start':'middle';
+    svg+=`<text x="${lx}" y="${ly}" text-anchor="${anchor}" class="radar-label">${lb}</text>`;
+  });
+  svg+='</svg>';
+  return svg;
+}
+
+function renderAIPanel(stock){
+  if(!stock){
+    document.getElementById('aiStockName').textContent='选择股票查看详情';
+    document.getElementById('aiStockCode').textContent='--';
+    document.getElementById('aiScoreBig').textContent='--';
+    document.getElementById('aiScoreBig').style.color='var(--text-3)';
+    document.getElementById('aiRec').innerHTML='';
+    document.getElementById('radarWrap').innerHTML='';
+    document.getElementById('aiDims').innerHTML='';
+    document.getElementById('aiDetails').innerHTML='';
+    return;
+  }
+  const sig = getSignalLabel(stock.aiScore);
+  document.getElementById('aiStockName').textContent=stock.name;
+  document.getElementById('aiStockCode').textContent=`${stock.code} | ${stock.sector} | ${stock.industry}`;
+  document.getElementById('aiScoreBig').textContent=stock.aiScore;
+  document.getElementById('aiScoreBig').style.color=getScoreColor(stock.aiScore);
+  document.getElementById('aiRec').innerHTML=`<span class="badge ${sig.cls}" style="font-size:13px;padding:4px 16px">${sig.text}</span>`;
+  document.getElementById('radarWrap').innerHTML=renderRadarChart(stock.dims);
+
+  const dimLabels = ['竞价异动','趋势动量','事件催化','板块热度','资金流入','技术形态','市场情绪'];
+  const dimVals = [stock.dims.auctionAnomaly, stock.dims.trendMomentum, stock.dims.eventCatalyst, stock.dims.sectorHeat, stock.dims.capitalFlow, stock.dims.techPattern, stock.dims.sentiment];
+  document.getElementById('aiDims').innerHTML = dimLabels.map((lb,i)=>`
+    <div class="ai-dim-row">
+      <span class="ai-dim-label">${lb}</span>
+      <div class="ai-dim-bar"><div class="ai-dim-fill" style="width:${dimVals[i]}%;background:${getDimColor(dimVals[i])}"></div></div>
+      <span class="ai-dim-val" style="color:${getDimColor(dimVals[i])}">${dimVals[i]}</span>
+    </div>
+  `).join('');
+
+  const chgCls = stock.change>0?'text-up':'text-down';
+  const trendCls = stock.recentGainPct>0?'text-up':'text-down';
+  document.getElementById('aiDetails').innerHTML=`
+    <div class="ai-detail-row"><span class="lbl">现价</span><span class="${chgCls}">¥${stock.price.toFixed(2)}</span></div>
+    <div class="ai-detail-row"><span class="lbl">竞价涨幅</span><span class="${chgCls}">${stock.change>0?'+':''}${stock.change.toFixed(2)}%</span></div>
+    <div class="ai-detail-row"><span class="lbl">竞价量比</span><span style="color:${stock.volRatio>=2?'var(--gold)':'var(--text-1)'}">${stock.volRatio}</span></div>
+    <div class="ai-detail-row"><span class="lbl">近3日涨幅</span><span class="${trendCls}">${stock.recentGainPct>0?'+':''}${stock.recentGainPct.toFixed(2)}%</span></div>
+    <div class="ai-detail-row"><span class="lbl">连涨天数</span><span style="color:${stock.consecutiveUp>=3?'var(--up)':stock.consecutiveUp>=1?'var(--gold)':'var(--text-2)'}">${stock.consecutiveUp}天</span></div>
+    <div class="ai-detail-row"><span class="lbl">交叉确认</span><span style="color:${stock.passCount>=5?'var(--up)':stock.passCount>=4?'var(--gold)':'var(--text-2)'}">${stock.passCount}/7 维度通过</span></div>
+    <div class="ai-detail-row"><span class="lbl">信号密度</span><span style="color:${stock.signalCount>=10?'#fff':stock.signalCount>=6?'var(--warn)':'var(--gold)'}">${stock.signalCount}/12 (${stock.signalCount>=10?'极强':stock.signalCount>=6?'中强':'较弱'})</span></div>
+    <div class="ai-detail-row"><span class="lbl">竞价成交额</span><span>${stock.bidAmt}万</span></div>
+    <div class="ai-detail-row"><span class="lbl">换手率</span><span>${stock.turnover}%</span></div>
+    <div class="ai-detail-row"><span class="lbl">流通市值</span><span>${fmtNum(stock.floatCap)}亿</span></div>
+    <div class="ai-detail-row"><span class="lbl">融资融券</span><span>${stock.margin?'✓ 可融':'✗ 不可融'}</span></div>
+    <div class="ai-detail-row"><span class="lbl">信号数量</span><span style="color:var(--gold)">${stock.signalCount}</span></div>
+  `;
+}
+
+function renderSignalLog(){
+  const log = document.getElementById('aiLog');
+  const items = State.filtered.slice(0,8).map(s=>{
+    const sig = getSignalLabel(s.aiScore);
+    return `<div class="ai-log-item"><span style="color:var(--text-1)">${s.name} <span class="badge ${sig.cls}" style="font-size:9px;padding:1px 6px">${sig.text}</span></span><span class="ai-log-time">${s.time}</span></div>`;
+  });
+  log.innerHTML = items.join('');
+}
+
+function renderCapitalFlowBar(){
+  const el = document.getElementById('cfbSectors');
+  if(State.capitalFlowSectors && State.capitalFlowSectors.length){
+    el.textContent = State.capitalFlowSectors.join('、');
+  } else {
+    el.textContent = '--';
+  }
+}
+
+function renderTicker(){
+  const track = document.getElementById('tickerTrack');
+  const items = NEWS.map(n=>`<span class="ticker-item">${n}</span>`).join('');
+  track.innerHTML = items + items; // duplicate for seamless loop
+}
+
+// ========================================
+// INTERACTION HANDLERS
+// ========================================
+function selectStock(code){
+  State.selectedCode = code;
+  const stock = State.stocks.find(s=>s.code===code);
+  renderAIPanel(stock);
+  // update row highlights
+  document.querySelectorAll('#tableBody tr').forEach(tr=>{
+    tr.classList.remove('selected');
+  });
+  event?.target?.closest?.('tr')?.classList?.add?.('selected');
+  renderTable();
+}
+
+function toggleAutoBuy(code, checkbox){
+  const stock = State.stocks.find(s=>s.code===code);
+  if(!stock) return;
+  if(checkbox.checked){
+    State.modalStock = stock;
+    document.getElementById('modalStockInfo').innerHTML=`
+      <div class="modal-info-row"><span class="lbl">股票</span><span style="color:var(--gold)">${stock.code} ${stock.name}</span></div>
+      <div class="modal-info-row"><span class="lbl">现价</span><span class="text-up">¥${stock.price.toFixed(2)}</span></div>
+      <div class="modal-info-row"><span class="lbl">AI评分</span><span style="color:${getScoreColor(stock.aiScore)}">${stock.aiScore}</span></div>
+      <div class="modal-info-row"><span class="lbl">信号</span><span>${getSignalLabel(stock.aiScore).text}</span></div>
+    `;
+    document.getElementById('modalQty').value = 1;
+    showModal('autoBuyModal');
+    checkbox.checked = false; // wait for confirm
+  } else {
+    stock.autoBuy = false;
+  }
+}
+
+function confirmAutoBuy(){
+  if(State.modalStock){
+    State.modalStock.autoBuy = true;
+    const qty = parseInt(document.getElementById('modalQty').value)||1;
+    // simulate adding to positions
+    addPosition(State.modalStock, qty*100);
+    renderTable();
+  }
+  hideModal('autoBuyModal');
+}
+
+function addPosition(stock, shares){
+  const existing = State.positions.find(p=>p.code===stock.code);
+  if(existing){
+    existing.shares += shares;
+    existing.cost = ((existing.cost*existing.shares + stock.price*shares)/(existing.shares+shares));
+  } else {
+    State.positions.push({code:stock.code, name:stock.name, shares, cost:stock.price, currentPrice:stock.price});
+  }
+  State.balance -= stock.price * shares;
+  updatePositionsUI();
+}
+
+function updatePositionsUI(){
+  document.getElementById('tradeBalance').textContent = `¥ ${fmtNum(Math.round(State.balance))}.00`;
+  const tbody = document.getElementById('positionsBody');
+  if(!State.positions.length){
+    tbody.innerHTML='<tr><td colspan="6" style="color:var(--text-3);text-align:center;padding:20px">暂无持仓</td></tr>';
+    return;
+  }
+  tbody.innerHTML = State.positions.map(p=>{
+    const pnl = (p.currentPrice - p.cost)*p.shares;
+    const cls = pnl>=0?'text-up':'text-down';
+    return `<tr>
+      <td style="color:var(--gold)">${p.code}</td>
+      <td class="name-cell">${p.name}</td>
+      <td>${p.shares}</td>
+      <td>${p.cost.toFixed(2)}</td>
+      <td class="${cls}">${p.currentPrice.toFixed(2)}</td>
+      <td class="${cls}">${pnl>=0?'+':''}${pnl.toFixed(0)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function openBuyModal(code){
+  const stock = State.stocks.find(s=>s.code===code);
+  if(!stock) return;
+  document.getElementById('tradeCode').value = stock.code;
+  document.getElementById('tradePrice').value = stock.price.toFixed(2);
+  showModal('tradingModal');
+}
+
+function simulateTrade(){
+  const code = document.getElementById('tradeCode').value;
+  const stock = State.stocks.find(s=>s.code===code);
+  if(!stock){ alert('未找到该股票'); return; }
+  const qty = parseInt(document.getElementById('tradeQty').value)||100;
+  addPosition(stock, qty);
+  hideModal('tradingModal');
+}
+
+function showModal(id){ document.getElementById(id).classList.add('show'); }
+function hideModal(id){ document.getElementById(id).classList.remove('show'); }
+function toggleTradingPanel(){ showModal('tradingModal'); }
+
+function toggleStrategy(el){
+  el.classList.toggle('active');
+  const key = el.dataset.key;
+  if(key) State.strategies[key] = el.classList.contains('active');
+}
+
+function sortTable(col){
+  if(State.sortCol===col) State.sortDir = State.sortDir==='asc'?'desc':'asc';
+  else { State.sortCol=col; State.sortDir='desc'; }
+  // update sort arrows in header
+  document.querySelectorAll('thead th').forEach(th=>{
+    th.classList.remove('sorted');
+    const arrow = th.querySelector('.sort-arrow');
+    if(arrow) arrow.remove();
+  });
+  const th = document.querySelector(`th[data-sort="${col}"]`);
+  if(th){
+    th.classList.add('sorted');
+    const arrow = document.createElement('span');
+    arrow.className='sort-arrow';
+    arrow.textContent = State.sortDir==='desc'?'▼':'▲';
+    th.appendChild(arrow);
+  }
+  renderTable();
+}
+
+function setFilter(el, mode){
+  State.filterMode = mode;
+  document.querySelectorAll('.table-toolbar .chip').forEach(c=>c.classList.remove('active'));
+  el.classList.add('active');
+  renderTable();
+}
+
+function onSearchInput(){
+  // Local filter only (no API call) — just filter existing list
+  State.searchQuery = document.getElementById('searchInput').value.trim();
+  renderTable();
+}
+
+async function filterStocks(){
+  const input = document.getElementById('searchInput').value.trim();
+  State.searchQuery = input;
+
+  // If input looks like a stock code (6 digits), try to look it up via API
+  if(/^\d{6}$/.test(input) && State.dataMode==='live'){
+    // Check if already in current list
+    const existing = State.stocks.find(s=>s.code===input);
+    if(existing){
+      // Already in list, just filter to it
+      renderTable();
+      selectStock(input);
+      return;
+    }
+    // Not in list — fetch from API
+    try {
+      const r = await fetch(`${State.apiBase}/api/stock/${input}`, {signal: AbortSignal.timeout(10000)});
+      const d = await r.json();
+      if(d.success && d.data){
+        // Add to stocks list (at the top)
+        d.data._searched = true; // mark as manually searched
+        State.stocks.unshift(d.data);
+        State.searchQuery = ''; // clear filter so it shows
+        renderTable();
+        selectStock(input);
+        renderAIPanel(d.data);
+        return;
+      }
+    } catch(e){
+      console.warn('[Search] lookup failed:', e);
+    }
+  }
+  renderTable();
+}
+
+function filterByThreshold(){ renderTable(); }
+function resetFilters(){
+  State.filterMode='all';
+  State.searchQuery='';
+  document.getElementById('searchInput').value='';
+  document.querySelectorAll('.table-toolbar .chip').forEach(c=>c.classList.remove('active'));
+  document.querySelector('.chip[data-filter="all"]').classList.add('active');
+  renderTable();
+}
+
+async function startSelection(){
+  if(State.dataMode==='live'){
+    const liveData = await fetchLiveStocks();
+    if(liveData && liveData.length>0){
+      State.stocks = liveData;
+    } else {
+      // Fallback to mock if API fails
+      State.stocks = generateStockData();
+      updateConnStatus(false, '回退模拟');
+    }
+  } else {
+    State.stocks = generateStockData();
+    updateConnStatus(false, '模拟模式');
+  }
+  State.selectedCode = State.stocks[0]?.code;
+  renderTable();
+  renderAIPanel(State.stocks.find(s=>s.code===State.selectedCode));
+  renderSignalLog();
+  renderCapitalFlowBar();
+}
+
+async function refreshData(){
+  if(State.dataMode==='live'){
+    // Live mode: refetch from API
+    const liveData = await fetchLiveStocks();
+    if(liveData && liveData.length>0){
+      State.stocks = liveData;
+      renderTable();
+      const sel = State.stocks.find(s=>s.code===State.selectedCode);
+      if(sel) renderAIPanel(sel);
+      renderSignalLog();
+      // update positions
+      State.positions.forEach(p=>{
+        const s = State.stocks.find(st=>st.code===p.code);
+        if(s) p.currentPrice = s.price;
+      });
+      updatePositionsUI();
+      return;
+    }
+    // If API failed, fall through to mock refresh
+  }
+  // Mock mode refresh (existing logic)
+  State.stocks.forEach(s=>{
+    const delta = gaussRand()*0.3;
+    s.change = +clamp(s.change+delta,-10,10).toFixed(2);
+    s.price = +(s.prevClose*(1+s.change/100)).toFixed(2);
+    s.volRatio = +clamp(s.volRatio+gaussRand()*0.2,0.1,10).toFixed(2);
+    s.capitalFlow = +(s.capitalFlow+rand(-200,200)).toFixed(0);
+    // recalc AI (v3 staged pipeline with event catalyst)
+    const vSpike = s.volRatio>=3?25:s.volRatio>=2?15:s.volRatio>=1.5?8:0;
+    s.dims.auctionAnomaly = clamp(+(s.volRatio*13+Math.max(0,s.change)*5+vSpike+rand(3,8)).toFixed(0),0,100);
+    s.dims.capitalFlow = clamp(s.dims.capitalFlow+randInt(-3,3),0,100);
+    // recalc signal count
+    let sc=0;
+    if(s.dims.auctionAnomaly>=80) sc+=3; else if(s.dims.auctionAnomaly>=60) sc+=2; else if(s.dims.auctionAnomaly>=40) sc+=1;
+    if(s.dims.trendMomentum>=75) sc+=2; else if(s.dims.trendMomentum>=50) sc+=1;
+    if(s.dims.sectorHeat>=75) sc+=2; else if(s.dims.sectorHeat>=55) sc+=1;
+    if(s.dims.eventCatalyst>=80) sc+=2; else if(s.dims.eventCatalyst>=55) sc+=1;
+    if(s.dims.capitalFlow>=70) sc+=1;
+    if(s.dims.techPattern>=65) sc+=1;
+    if(s.dims.sentiment>=70) sc+=1;
+    s.signalCount = clamp(sc,0,12);
+    // recalc passCount
+    let pc=0;
+    if(s.dims.auctionAnomaly>=60) pc++;
+    if(s.dims.trendMomentum>=55) pc++;
+    if(s.dims.sectorHeat>=60) pc++;
+    if(s.dims.capitalFlow>=55) pc++;
+    if(s.dims.techPattern>=55) pc++;
+    if(s.dims.sentiment>=60) pc++;
+    if(s.dims.eventCatalyst>=55) pc++;
+    s.passCount = pc;
+    const bs = s.dims.auctionAnomaly*.22+s.dims.trendMomentum*.18+s.dims.eventCatalyst*.16+s.dims.sectorHeat*.12+s.dims.capitalFlow*.12+s.dims.techPattern*.10+s.dims.sentiment*.10;
+    const db = s.signalCount>=10?15:s.signalCount>=8?10:s.signalCount>=6?6:s.signalCount>=4?3:0;
+    const ib = (s.dims.auctionAnomaly>=78&&(s.dims.trendMomentum>=72||s.dims.eventCatalyst>=75))?8:(s.dims.auctionAnomaly>=65&&(s.dims.trendMomentum>=60||s.dims.eventCatalyst>=60))?4:0;
+    s.aiScore = clamp(Math.round(bs+db+ib),5,99);
+  });
+  renderTable();
+  const sel = State.stocks.find(s=>s.code===State.selectedCode);
+  if(sel) renderAIPanel(sel);
+  renderSignalLog();
+  // update positions
+  State.positions.forEach(p=>{
+    const s = State.stocks.find(st=>st.code===p.code);
+    if(s) p.currentPrice = s.price;
+  });
+  updatePositionsUI();
+}
+
+// ========================================
+// CLOCK & SIMULATION
+// ========================================
+function updateClock(){
+  const now = new Date();
+  const h = String(now.getHours()).padStart(2,'0');
+  const m = String(now.getMinutes()).padStart(2,'0');
+  const s = String(now.getSeconds()).padStart(2,'0');
+  document.getElementById('clockDisplay').textContent = `${h}:${m}:${s}`;
+  const y = now.getFullYear();
+  const mo = String(now.getMonth()+1).padStart(2,'0');
+  const d = String(now.getDate()).padStart(2,'0');
+  const days = ['日','一','二','三','四','五','六'];
+  document.getElementById('dateDisplay').textContent = `${y}-${mo}-${d} 星期${days[now.getDay()]}`;
+  document.getElementById('sbTime').textContent = `${h}:${m}:${s}`;
+
+  // market phase
+  const mins = now.getHours()*60+now.getMinutes();
+  const phaseEl = document.getElementById('marketPhase');
+  if(mins>=555&&mins<570){ phaseEl.textContent='竞价阶段'; phaseEl.className='h-phase auction'; }
+  else if(mins>=570&&mins<690){ phaseEl.textContent='交易阶段(上午)'; phaseEl.className='h-phase trading'; }
+  else if(mins>=690&&mins<780){ phaseEl.textContent='午间休市'; phaseEl.className='h-phase closed'; }
+  else if(mins>=780&&mins<900){ phaseEl.textContent='交易阶段(下午)'; phaseEl.className='h-phase trading'; }
+  else { phaseEl.textContent='盘后/休市'; phaseEl.className='h-phase closed'; }
+}
+
+// ========================================
+// INIT
+// ========================================
+async function init(){
+  // Check if backend is available
+  const apiAlive = await checkApiHealth();
+  if(apiAlive){
+    State.dataMode = 'live';
+    const knob = document.getElementById('dataModeKnob');
+    const sw = document.getElementById('dataModeSwitch');
+    const label = document.getElementById('dataModeLabel');
+    knob.style.left = '18px';
+    knob.style.background = 'var(--down)';
+    sw.style.background = 'rgba(34,197,94,.3)';
+    label.textContent = '实时';
+    label.style.color = 'var(--down)';
+  } else {
+    updateConnStatus(false, '模拟模式');
+  }
+
+  await startSelection();
+  renderTicker();
+  updateClock();
+  setInterval(updateClock, 1000);
+  // Live mode: refresh every 15s; Mock mode: every 5s
+  setInterval(()=>refreshData(), State.dataMode==='live'?15000:5000);
+}
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
