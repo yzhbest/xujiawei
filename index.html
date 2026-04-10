@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI智能竞价选股系统 v2.0</title>
+<title>AI智能竞价选股系统 v3.0</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 /* === RESET & VARIABLES === */
@@ -204,6 +204,15 @@ td.sector-cell { font-family: var(--font-sans); }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 @keyframes glow-pulse { 0%,100% { box-shadow: 0 0 4px rgba(239,68,68,.3); } 50% { box-shadow: 0 0 12px rgba(239,68,68,.6); } }
 @keyframes modal-in { from { opacity: 0; transform: scale(.95) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+
+/* === BACKTEST TABLES === */
+.bt-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.bt-table th { background: var(--bg-tertiary); color: var(--text-2); padding: 6px 8px; text-align: left; font-weight: 500; border-bottom: 1px solid var(--border); position: sticky; top: 0; }
+.bt-table td { padding: 5px 8px; border-bottom: 1px solid var(--border); color: var(--text-1); }
+.bt-table tr:hover td { background: var(--bg-hover); }
+.bt-card { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px; padding: 14px; text-align: center; }
+.bt-card .bt-val { font-size: 22px; font-weight: 700; font-family: var(--font-mono); margin-bottom: 2px; }
+.bt-card .bt-lbl { font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 1px; }
 @keyframes ticker-scroll { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
 @keyframes flash-up { from { background: var(--up-bg); } to { background: transparent; } }
 @keyframes flash-down { from { background: var(--down-bg); } to { background: transparent; } }
@@ -221,7 +230,7 @@ td.sector-cell { font-family: var(--font-sans); }
 <header class="header" id="header">
   <div class="h-left">
     <span class="h-logo">AI智能竞价选股系统</span>
-    <span class="h-ver">v2.0</span>
+    <span class="h-ver">v3.0</span>
   </div>
   <div class="h-center">
     <div class="h-status"><span class="h-dot" id="dataSourceDot"></span><span id="dataSourceText">数据源</span></div>
@@ -238,6 +247,7 @@ td.sector-cell { font-family: var(--font-sans); }
   <div class="h-right">
     <span class="h-date" id="dateDisplay"></span>
     <span class="h-clock" id="clockDisplay">09:25:00</span>
+    <button class="h-btn" onclick="showBacktest()">📊 策略回测</button>
     <button class="h-btn" onclick="toggleTradingPanel()">💹 交易面板</button>
   </div>
 </header>
@@ -424,6 +434,77 @@ td.sector-cell { font-family: var(--font-sans); }
   </div>
 </div>
 
+<!-- Backtest Modal -->
+<div class="modal-overlay" id="backtestModal">
+  <div class="modal-card" style="width:900px;max-width:95vw;max-height:90vh;overflow-y:auto;">
+    <h3>📊 策略回测 <span style="font-size:11px;color:var(--text-3);font-weight:400;margin-left:auto" id="btStatus">就绪</span></h3>
+
+    <!-- Config -->
+    <div id="btConfig" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+      <div class="modal-input-group" style="flex:1;min-width:100px"><label>回测天数</label><input class="modal-input" id="btDays" type="number" value="10" min="3" max="30"></div>
+      <div class="modal-input-group" style="flex:1;min-width:100px"><label>AI阈值</label><input class="modal-input" id="btThreshold" type="number" value="70" min="50" max="99"></div>
+      <div class="modal-input-group" style="flex:1;min-width:100px"><label>每日选股数</label><input class="modal-input" id="btTopN" type="number" value="5" min="1" max="20"></div>
+      <div class="modal-input-group" style="flex:1;min-width:100px"><label>最低量比</label><input class="modal-input" id="btVolRatio" type="number" value="0.5" min="0" max="10" step="0.1"></div>
+    </div>
+    <div class="modal-actions" style="margin-bottom:16px;">
+      <button class="btn-cancel" onclick="hideModal('backtestModal')">关 闭</button>
+      <button class="btn-confirm" id="btRunBtn" onclick="runBacktest()">开 始 回 测</button>
+    </div>
+
+    <!-- Progress -->
+    <div id="btProgress" style="display:none;margin-bottom:16px;">
+      <div style="background:var(--bg-primary);border-radius:4px;height:6px;overflow:hidden;">
+        <div id="btProgressBar" style="width:0%;height:100%;background:var(--accent);transition:width .3s;border-radius:4px;"></div>
+      </div>
+      <div id="btProgressText" style="font-size:11px;color:var(--text-3);margin-top:4px;">准备中...</div>
+    </div>
+
+    <!-- Results -->
+    <div id="btResults" style="display:none;">
+      <!-- Summary Cards -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;" id="btSummaryCards"></div>
+
+      <!-- Equity Curve -->
+      <div style="margin-bottom:16px;">
+        <div style="font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:8px;">累计收益曲线</div>
+        <div id="btEquityChart" style="height:160px;background:var(--bg-primary);border-radius:8px;border:1px solid var(--border);position:relative;overflow:hidden;"></div>
+      </div>
+
+      <!-- Two columns: Score buckets + Sector perf -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+        <div>
+          <div style="font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:8px;">AI评分区间表现</div>
+          <table class="bt-table"><thead><tr><th>评分区间</th><th>交易数</th><th>胜率</th><th>平均收益</th></tr></thead><tbody id="btScoreBody"></tbody></table>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:8px;">板块表现</div>
+          <table class="bt-table"><thead><tr><th>板块</th><th>交易数</th><th>胜率</th><th>平均收益</th></tr></thead><tbody id="btSectorBody"></tbody></table>
+        </div>
+      </div>
+
+      <!-- Daily detail table -->
+      <div style="margin-bottom:16px;">
+        <div style="font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:8px;">每日选股明细</div>
+        <div style="max-height:300px;overflow-y:auto;">
+          <table class="bt-table"><thead><tr><th>日期</th><th>选股数</th><th>胜率</th><th>平均收益</th><th>累计</th><th>选中标的</th></tr></thead><tbody id="btDailyBody"></tbody></table>
+        </div>
+      </div>
+
+      <!-- Top/worst trades -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div>
+          <div style="font-size:12px;font-weight:700;color:var(--down);margin-bottom:8px;">最佳交易 TOP5</div>
+          <table class="bt-table"><thead><tr><th>日期</th><th>代码</th><th>名称</th><th>竞价涨幅</th><th>日内收益</th></tr></thead><tbody id="btTopBody"></tbody></table>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:var(--up);margin-bottom:8px;">最差交易 TOP5</div>
+          <table class="bt-table"><thead><tr><th>日期</th><th>代码</th><th>名称</th><th>竞价涨幅</th><th>日内收益</th></tr></thead><tbody id="btWorstBody"></tbody></table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 // ========================================
 // CONFIG & CONSTANTS
@@ -528,19 +609,23 @@ const State = {
 // ========================================
 async function fetchLiveStocks(){
   const thres = parseInt(document.getElementById('thresholdVal')?.textContent||'70');
-  const minVol = parseFloat(document.getElementById('volRatioVal')?.textContent||'1.0');
+  const minVol = parseFloat(document.getElementById('volRatioVal')?.textContent||'0.5');
+  const topN = parseInt(document.getElementById('topNVal')?.textContent||'50');
+  const maxMv = parseFloat(document.getElementById('maxMvVal')?.textContent||'2000');
   const params = new URLSearchParams({
-    min_change: '0.5',
+    min_change: '-5',
     max_change: '20',
     min_vol_ratio: minVol.toString(),
     min_price: '3',
     max_price: '300',
+    max_mv: maxMv.toString(),
     exclude_st: State.strategies.excludeST?'true':'false',
     exclude_limit_up: 'true',
-    top_n: '50',
+    top_n: topN.toString(),
+    threshold: thres.toString(),
   });
   try {
-    const r = await fetch(`${State.apiBase}/api/stocks?${params}`, {signal: AbortSignal.timeout(15000)});
+    const r = await fetch(`${State.apiBase}/api/stocks?${params}`, {signal: AbortSignal.timeout(30000)});
     const d = await r.json();
     if(d.success && d.data){
       State.apiConnected = true;
@@ -550,6 +635,11 @@ async function fetchLiveStocks(){
       const abMap = {};
       State.stocks.forEach(s=>{if(s.autoBuy) abMap[s.code]=true;});
       d.data.forEach(s=>{s.autoBuy=!!abMap[s.code]; s.selected=s.code===State.selectedCode;});
+      // update sector heat from response
+      if(d.sectorHeat){
+        const hotSectors = Object.entries(d.sectorHeat).sort((a,b)=>b[1]-a[1]).slice(0,3).map(e=>e[0]);
+        State.capitalFlowSectors = hotSectors;
+      }
       return d.data;
     }
     return null;
@@ -776,26 +866,49 @@ function applyFilters(){
     const q = State.searchQuery.toLowerCase();
     list = list.filter(s=>s.code.includes(q)||s.name.includes(q));
   }
-  if(State.filterMode==='strongBuy') list=list.filter(s=>s.aiScore>=85);
-  else if(State.filterMode==='buy') list=list.filter(s=>s.aiScore>=70);
-  else if(State.filterMode==='sector') list=list.filter(s=>s.sectorStr==='强');
+  if(State.filterMode==='strongBuy'){
+    // 强烈推荐：最严格筛选，只取1-3只
+    // 条件：AI分>=88 + 板块热度高(sectorStr=强) + 竞价量比>=1.5 + 竞价涨幅>0 + 多维交叉确认(passCount>=5)
+    list = list.filter(s => s.aiScore >= 88 && s.sectorStr === '强' && s.volRatio >= 1.5 && s.change > 0 && s.passCount >= 5);
+    // 如果严格条件下没有结果，放宽到AI分>=85+量比>=1+涨幅>0
+    if(!list.length) list = [...State.stocks].filter(s => s.aiScore >= 85 && s.change > 0 && s.volRatio >= 1.0);
+    // 按板块热度*AI分综合排序，只取前3
+    list.sort((a,b) => (b.dims.sectorHeat * 0.4 + b.aiScore * 0.6) - (a.dims.sectorHeat * 0.4 + a.aiScore * 0.6));
+    list = list.slice(0, 3);
+  } else if(State.filterMode==='buy'){
+    // 推荐买入：基于市场行情+行业动态的综合推荐
+    // 条件：AI分>=70 + 资金净流入>0 + 交叉确认>=4维 + 信号数>=6
+    list = list.filter(s => s.aiScore >= 70 && s.capitalFlow > 0 && s.passCount >= 4 && s.signalCount >= 6);
+    // 如果太少，放宽到AI>=70+资金流入>0
+    if(list.length < 2) list = [...State.stocks].filter(s => s.aiScore >= 70 && s.capitalFlow > 0);
+    // 按AI分排序
+    list.sort((a,b) => b.aiScore - a.aiScore);
+  } else if(State.filterMode==='sector'){
+    // 板块强势：按板块热度维度排名，显示所有选出的股票
+    list.sort((a,b) => b.dims.sectorHeat - a.dims.sectorHeat || b.aiScore - a.aiScore);
+  }
 
-  const thres = parseInt(document.getElementById('thresholdVal')?.textContent||'70');
-  const minVol = parseFloat(document.getElementById('volRatioVal')?.textContent||'1.0');
-  const maxCap = parseInt(document.getElementById('capVal')?.textContent||'500');
-  list = list.filter(s=>s.aiScore>=thres&&s.volRatio>=minVol&&s.floatCap<=maxCap);
+  // 对于特殊标签页，跳过通用参数过滤和数量限制（它们有自己的筛选逻辑）
+  if(State.filterMode === 'all'){
+    const thres = parseInt(document.getElementById('thresholdVal')?.textContent||'70');
+    const minVol = parseFloat(document.getElementById('volRatioVal')?.textContent||'1.0');
+    const maxCap = parseInt(document.getElementById('capVal')?.textContent||'500');
+    list = list.filter(s=>s.aiScore>=thres&&s.volRatio>=minVol&&s.floatCap<=maxCap);
 
-  // sort
-  const col = State.sortCol;
-  const dir = State.sortDir==='asc'?1:-1;
-  list.sort((a,b)=>{
-    let va=a[col], vb=b[col];
-    if(typeof va==='string') return va.localeCompare(vb)*dir;
-    return (va-vb)*dir;
-  });
-  // 精准筛选：只保留最强的前N只（默认5）
-  const maxSignals = parseInt(document.getElementById('maxSignalsVal')?.textContent||'5');
-  list = list.slice(0, maxSignals);
+    // sort
+    const col = State.sortCol;
+    const dir = State.sortDir==='asc'?1:-1;
+    list.sort((a,b)=>{
+      let va=a[col], vb=b[col];
+      if(typeof va==='string') return va.localeCompare(vb)*dir;
+      return (va-vb)*dir;
+    });
+    // 精准筛选：只保留最强的前N只（默认5）
+    const maxSignals = parseInt(document.getElementById('maxSignalsVal')?.textContent||'5');
+    list = list.slice(0, maxSignals);
+  }
+  // 板块强势：显示全部选出的股票，按板块热度排名
+  // 推荐买入/强烈推荐：已在上面完成筛选和排序
   State.filtered = list;
 }
 
@@ -1231,6 +1344,197 @@ async function refreshData(){
 }
 
 // ========================================
+// BACKTEST
+// ========================================
+async function runBacktest(){
+  const btn = document.getElementById('btRunBtn');
+  const progress = document.getElementById('btProgress');
+  const results = document.getElementById('btResults');
+  const status = document.getElementById('btStatus');
+
+  btn.disabled = true;
+  btn.textContent = '回测中...';
+  progress.style.display = 'block';
+  results.style.display = 'none';
+  status.textContent = '正在回测...';
+  document.getElementById('btProgressBar').style.width = '10%';
+  document.getElementById('btProgressText').textContent = '正在获取历史数据并计算...';
+
+  const config = {
+    days: parseInt(document.getElementById('btDays').value) || 10,
+    threshold: parseInt(document.getElementById('btThreshold').value) || 70,
+    top_n: parseInt(document.getElementById('btTopN').value) || 5,
+    min_vol_ratio: parseFloat(document.getElementById('btVolRatio').value) || 0.5,
+    min_change: -5,
+    max_change: 20,
+    min_price: 3,
+    max_price: 300,
+    max_mv: parseInt(document.getElementById('maxMvVal')?.textContent || '2000'),
+    exclude_st: State.strategies.excludeST,
+    exclude_limit_up: true,
+  };
+
+  // Simulate progress
+  let pct = 10;
+  const pTimer = setInterval(()=>{
+    pct = Math.min(pct + Math.random()*8, 90);
+    document.getElementById('btProgressBar').style.width = pct+'%';
+  }, 1000);
+
+  try {
+    const r = await fetch('/api/backtest', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(config),
+      signal: AbortSignal.timeout(300000), // 5 min timeout
+    });
+    const d = await r.json();
+
+    clearInterval(pTimer);
+    document.getElementById('btProgressBar').style.width = '100%';
+    document.getElementById('btProgressText').textContent = '回测完成';
+
+    if(d.success && d.data){
+      renderBacktestResults(d.data);
+      status.textContent = `完成 (${d.data.summary.totalDays}天/${d.data.summary.totalTrades}笔)`;
+    } else {
+      status.textContent = '回测失败: ' + (d.error||'未知错误');
+    }
+  } catch(e){
+    clearInterval(pTimer);
+    status.textContent = '回测失败: ' + e.message;
+    document.getElementById('btProgressText').textContent = '出错: ' + e.message;
+  }
+
+  btn.disabled = false;
+  btn.textContent = '开 始 回 测';
+}
+
+function renderBacktestResults(data){
+  const results = document.getElementById('btResults');
+  results.style.display = 'block';
+  const s = data.summary;
+
+  // Summary cards
+  const winColor = s.overallWinRate>=60 ? 'var(--up)' : s.overallWinRate>=50 ? 'var(--gold)' : 'var(--down)';
+  const retColor = s.avgReturn>=0 ? 'var(--up)' : 'var(--down)';
+  const cumColor = s.cumReturn>=0 ? 'var(--up)' : 'var(--down)';
+  document.getElementById('btSummaryCards').innerHTML = `
+    <div class="bt-card"><div class="bt-val" style="color:${winColor}">${s.overallWinRate}%</div><div class="bt-lbl">总胜率 (${s.totalWins}胜${s.totalLosses}负)</div></div>
+    <div class="bt-card"><div class="bt-val" style="color:${retColor}">${s.avgReturn>0?'+':''}${s.avgReturn}%</div><div class="bt-lbl">平均日内收益</div></div>
+    <div class="bt-card"><div class="bt-val" style="color:${cumColor}">${s.cumReturn>0?'+':''}${s.cumReturn}%</div><div class="bt-lbl">累计收益 (${s.totalDays}天)</div></div>
+    <div class="bt-card"><div class="bt-val" style="color:var(--text-1)">${s.totalTrades}</div><div class="bt-lbl">总交易笔数</div></div>
+  `;
+
+  // Equity curve (simple canvas chart)
+  renderEquityCurve(data.equityCurve);
+
+  // Score buckets
+  const scoreBody = document.getElementById('btScoreBody');
+  scoreBody.innerHTML = Object.entries(data.scoreBuckets).map(([bucket,v])=>{
+    if(!v.trades) return '';
+    const wr = v.winRate>=60?'color:var(--up)':v.winRate>=50?'color:var(--gold)':'color:var(--down)';
+    const ar = v.avgReturn>=0?'color:var(--up)':'color:var(--down)';
+    return `<tr><td style="font-weight:600">AI ${bucket}</td><td>${v.trades}</td><td style="${wr}">${v.winRate}%</td><td style="${ar}">${v.avgReturn>0?'+':''}${v.avgReturn}%</td></tr>`;
+  }).join('');
+
+  // Sector performance
+  const sectorBody = document.getElementById('btSectorBody');
+  const sectors = Object.entries(data.sectorPerf).sort((a,b)=>b[1].avgReturn-a[1].avgReturn);
+  sectorBody.innerHTML = sectors.map(([sec,v])=>{
+    const wr = v.winRate>=60?'color:var(--up)':v.winRate>=50?'color:var(--gold)':'color:var(--down)';
+    const ar = v.avgReturn>=0?'color:var(--up)':'color:var(--down)';
+    return `<tr><td>${sec}</td><td>${v.trades}</td><td style="${wr}">${v.winRate}%</td><td style="${ar}">${v.avgReturn>0?'+':''}${v.avgReturn}%</td></tr>`;
+  }).join('');
+
+  // Daily results
+  const dailyBody = document.getElementById('btDailyBody');
+  let cum = 0;
+  dailyBody.innerHTML = data.dailyResults.map(d=>{
+    cum += d.avgReturn;
+    const wr = d.winRate>=60?'color:var(--up)':d.winRate>=50?'color:var(--gold)':'color:var(--down)';
+    const ar = d.avgReturn>=0?'color:var(--up)':'color:var(--down)';
+    const cc = cum>=0?'color:var(--up)':'color:var(--down)';
+    const names = d.trades.map(t=>`<span style="color:${t.win?'var(--up)':'var(--down)'}; margin-right:4px;" title="AI:${t.aiScore} 买:${t.buyPrice} 卖:${t.closePrice} 收益:${t.intradayReturn}%">${t.name}(${t.intradayReturn>0?'+':''}${t.intradayReturn}%)</span>`).join('');
+    return `<tr><td style="font-family:var(--font-mono);white-space:nowrap">${d.tradeDate.slice(0,4)}-${d.tradeDate.slice(4,6)}-${d.tradeDate.slice(6)}</td><td>${d.selected}</td><td style="${wr}">${d.winRate}%</td><td style="${ar}">${d.avgReturn>0?'+':''}${d.avgReturn}%</td><td style="${cc}">${cum>0?'+':''}${cum.toFixed(2)}%</td><td style="font-size:10px;max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${names}</td></tr>`;
+  }).join('');
+
+  // Top trades
+  document.getElementById('btTopBody').innerHTML = data.topTrades.map(t=>{
+    return `<tr><td style="font-family:var(--font-mono);font-size:10px">${t.tradeDate||''}</td><td>${t.code}</td><td>${t.name}</td><td>${t.auctionChange>0?'+':''}${t.auctionChange}%</td><td style="color:var(--up);font-weight:600">+${t.intradayReturn}%</td></tr>`;
+  }).join('');
+
+  // Worst trades
+  document.getElementById('btWorstBody').innerHTML = data.worstTrades.map(t=>{
+    return `<tr><td style="font-family:var(--font-mono);font-size:10px">${t.tradeDate||''}</td><td>${t.code}</td><td>${t.name}</td><td>${t.auctionChange>0?'+':''}${t.auctionChange}%</td><td style="color:var(--down);font-weight:600">${t.intradayReturn}%</td></tr>`;
+  }).join('');
+}
+
+function renderEquityCurve(curve){
+  const container = document.getElementById('btEquityChart');
+  if(!curve || !curve.length){ container.innerHTML='<div style="color:var(--text-3);text-align:center;padding:40px">无数据</div>'; return; }
+
+  const W = container.clientWidth || 800;
+  const H = container.clientHeight || 160;
+  const pad = {t:20,r:50,b:25,l:50};
+  const cw = W-pad.l-pad.r;
+  const ch = H-pad.t-pad.b;
+
+  const vals = curve.map(c=>c.cumReturn);
+  const maxV = Math.max(...vals, 0.5);
+  const minV = Math.min(...vals, -0.5);
+  const range = maxV - minV || 1;
+
+  let svg = `<svg width="${W}" height="${H}" style="display:block">`;
+
+  // Zero line
+  const zeroY = pad.t + ch * (1 - (0 - minV) / range);
+  svg += `<line x1="${pad.l}" y1="${zeroY}" x2="${W-pad.r}" y2="${zeroY}" stroke="var(--border-hl)" stroke-dasharray="4,4" stroke-width="1"/>`;
+  svg += `<text x="${W-pad.r+4}" y="${zeroY+3}" fill="var(--text-3)" font-size="10" font-family="var(--font-mono)">0%</text>`;
+
+  // Points & line
+  const points = curve.map((c,i)=>{
+    const x = pad.l + (i / (curve.length-1||1)) * cw;
+    const y = pad.t + ch * (1 - (c.cumReturn - minV) / range);
+    return {x,y,c};
+  });
+
+  // Area fill
+  const areaPath = points.map((p,i)=>i===0?`M${p.x},${zeroY} L${p.x},${p.y}`:`L${p.x},${p.y}`).join(' ') + ` L${points[points.length-1].x},${zeroY} Z`;
+  const lastVal = curve[curve.length-1].cumReturn;
+  const fillColor = lastVal >= 0 ? 'rgba(239,68,68,.08)' : 'rgba(34,197,94,.08)';
+  svg += `<path d="${areaPath}" fill="${fillColor}"/>`;
+
+  // Line
+  const linePath = points.map((p,i)=>`${i===0?'M':'L'}${p.x},${p.y}`).join(' ');
+  const lineColor = lastVal >= 0 ? 'var(--up)' : 'var(--down)';
+  svg += `<path d="${linePath}" fill="none" stroke="${lineColor}" stroke-width="2"/>`;
+
+  // Dots & labels
+  points.forEach((p,i)=>{
+    svg += `<circle cx="${p.x}" cy="${p.y}" r="3" fill="${lineColor}" stroke="var(--bg-primary)" stroke-width="1.5"/>`;
+    if(i===0||i===points.length-1||i%Math.ceil(points.length/6)===0){
+      svg += `<text x="${p.x}" y="${H-4}" fill="var(--text-3)" font-size="9" font-family="var(--font-mono)" text-anchor="middle">${p.c.date.slice(4,6)}/${p.c.date.slice(6)}</text>`;
+    }
+  });
+
+  // End value label
+  const last = points[points.length-1];
+  svg += `<text x="${W-pad.r+4}" y="${last.y+4}" fill="${lineColor}" font-size="11" font-weight="700" font-family="var(--font-mono)">${lastVal>0?'+':''}${lastVal}%</text>`;
+
+  // Max/min labels
+  svg += `<text x="${pad.l-4}" y="${pad.t+8}" fill="var(--text-3)" font-size="9" font-family="var(--font-mono)" text-anchor="end">${maxV.toFixed(1)}%</text>`;
+  svg += `<text x="${pad.l-4}" y="${H-pad.b}" fill="var(--text-3)" font-size="9" font-family="var(--font-mono)" text-anchor="end">${minV.toFixed(1)}%</text>`;
+
+  svg += '</svg>';
+  container.innerHTML = svg;
+}
+
+function showBacktest(){
+  document.getElementById('backtestModal').classList.add('show');
+}
+
+// ========================================
 // CLOCK & SIMULATION
 // ========================================
 function updateClock(){
@@ -1280,8 +1584,8 @@ async function init(){
   renderTicker();
   updateClock();
   setInterval(updateClock, 1000);
-  // Live mode: refresh every 15s; Mock mode: every 5s
-  setInterval(()=>refreshData(), State.dataMode==='live'?15000:5000);
+  // Live mode: refresh every 30s (API rate limit); Mock mode: every 5s
+  setInterval(()=>refreshData(), State.dataMode==='live'?30000:5000);
 }
 document.addEventListener('DOMContentLoaded', init);
 </script>
