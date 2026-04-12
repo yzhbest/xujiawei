@@ -1,0 +1,4 @@
+node_modules/
+.daily_briefing.json
+.env
+*.log
