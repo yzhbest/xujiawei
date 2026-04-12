@@ -1038,6 +1038,150 @@ async function fetchMarketAnalysis() {
   return result;
 }
 
+// ============================================
+// PRE-MARKET DAILY BRIEFING SCHEDULER
+// ============================================
+
+// Persistent storage for daily briefing (survives cache expiry)
+let dailyBriefing = null; // { date, generatedAt, data }
+const BRIEFING_FILE = path.join(__dirname, '.daily_briefing.json');
+
+// Load saved briefing from disk on startup
+function loadBriefingFromDisk() {
+  try {
+    if (fs.existsSync(BRIEFING_FILE)) {
+      const raw = fs.readFileSync(BRIEFING_FILE, 'utf-8');
+      dailyBriefing = JSON.parse(raw);
+      console.log(`[Scheduler] Loaded saved briefing for ${dailyBriefing.date}, generated at ${dailyBriefing.generatedAt}`);
+    }
+  } catch (e) {
+    console.warn('[Scheduler] Failed to load saved briefing:', e.message);
+  }
+}
+
+// Save briefing to disk
+function saveBriefingToDisk(briefing) {
+  try {
+    fs.writeFileSync(BRIEFING_FILE, JSON.stringify(briefing), 'utf-8');
+  } catch (e) {
+    console.warn('[Scheduler] Failed to save briefing:', e.message);
+  }
+}
+
+// Generate daily pre-market briefing
+async function generateDailyBriefing() {
+  console.log(`[Scheduler] Generating daily pre-market briefing...`);
+  try {
+    // Clear cache so we get fresh data
+    delete cache['market_analysis'];
+    const data = await fetchMarketAnalysis();
+    const now = new Date();
+    dailyBriefing = {
+      date: data.tradeDate,
+      generatedAt: now.toISOString(),
+      generatedAtLocal: `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`,
+      type: 'pre-market', // pre-market / intraday / post-market
+      data,
+    };
+    saveBriefingToDisk(dailyBriefing);
+    console.log(`[Scheduler] Daily briefing generated for ${data.tradeDate} at ${dailyBriefing.generatedAtLocal}`);
+    return dailyBriefing;
+  } catch (e) {
+    console.error('[Scheduler] Failed to generate daily briefing:', e.message);
+    return null;
+  }
+}
+
+// Check if today is a trading day
+async function isTradingDay(dateStr) {
+  try {
+    const dates = await getRecentTradeDates(5);
+    return dates.includes(dateStr);
+  } catch (e) {
+    // Fallback: weekday check
+    const day = new Date().getDay();
+    return day >= 1 && day <= 5;
+  }
+}
+
+// Schedule config
+const SCHEDULE_CONFIG = {
+  preMarketHour: 8,    // 8:30 AM — pre-market briefing
+  preMarketMinute: 30,
+  intradayHour: 11,    // 11:35 AM — morning session review
+  intradayMinute: 35,
+  postMarketHour: 15,  // 15:10 PM — post-market summary
+  postMarketMinute: 10,
+};
+
+// Scheduler: runs every minute, checks if it's time to generate
+let lastScheduleRun = '';
+function startScheduler() {
+  loadBriefingFromDisk();
+
+  setInterval(async () => {
+    const now = new Date();
+    const h = now.getHours();
+    const m = now.getMinutes();
+    const todayStr = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
+    const timeKey = `${todayStr}-${h}-${m}`;
+
+    // Avoid running the same minute twice
+    if (timeKey === lastScheduleRun) return;
+
+    // Pre-market briefing: 8:30 AM
+    if (h === SCHEDULE_CONFIG.preMarketHour && m === SCHEDULE_CONFIG.preMarketMinute) {
+      const isTrading = await isTradingDay(todayStr);
+      if (isTrading || true) { // Always generate on weekdays even if trade_cal hasn't updated
+        // Check if we already generated today's briefing
+        if (!dailyBriefing || dailyBriefing.date !== todayStr || dailyBriefing.type !== 'pre-market') {
+          lastScheduleRun = timeKey;
+          const brief = await generateDailyBriefing();
+          if (brief) brief.type = 'pre-market';
+        }
+      }
+    }
+
+    // Intraday review: 11:35 AM (after morning session)
+    if (h === SCHEDULE_CONFIG.intradayHour && m === SCHEDULE_CONFIG.intradayMinute) {
+      lastScheduleRun = timeKey;
+      delete cache['market_analysis'];
+      const data = await fetchMarketAnalysis();
+      if (data) {
+        dailyBriefing = {
+          date: data.tradeDate,
+          generatedAt: now.toISOString(),
+          generatedAtLocal: `${todayStr.slice(0,4)}-${todayStr.slice(4,6)}-${todayStr.slice(6)} ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`,
+          type: 'intraday',
+          data,
+        };
+        saveBriefingToDisk(dailyBriefing);
+        console.log(`[Scheduler] Intraday review updated for ${data.tradeDate}`);
+      }
+    }
+
+    // Post-market summary: 15:10 PM
+    if (h === SCHEDULE_CONFIG.postMarketHour && m === SCHEDULE_CONFIG.postMarketMinute) {
+      lastScheduleRun = timeKey;
+      delete cache['market_analysis'];
+      const data = await fetchMarketAnalysis();
+      if (data) {
+        dailyBriefing = {
+          date: data.tradeDate,
+          generatedAt: now.toISOString(),
+          generatedAtLocal: `${todayStr.slice(0,4)}-${todayStr.slice(4,6)}-${todayStr.slice(6)} ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`,
+          type: 'post-market',
+          data,
+        };
+        saveBriefingToDisk(dailyBriefing);
+        console.log(`[Scheduler] Post-market summary updated for ${data.tradeDate}`);
+      }
+    }
+  }, 60000); // Check every 60 seconds
+
+  console.log(`[Scheduler] Started. Schedule: pre-market ${SCHEDULE_CONFIG.preMarketHour}:${String(SCHEDULE_CONFIG.preMarketMinute).padStart(2,'0')}, intraday ${SCHEDULE_CONFIG.intradayHour}:${String(SCHEDULE_CONFIG.intradayMinute).padStart(2,'0')}, post-market ${SCHEDULE_CONFIG.postMarketHour}:${String(SCHEDULE_CONFIG.postMarketMinute).padStart(2,'0')}`);
+}
+
 function sendJSON(res, data, status = 200) {
   const body = JSON.stringify(data);
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
@@ -1107,11 +1251,93 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/market-analysis') {
     try {
       const result = await fetchMarketAnalysis();
-      sendJSON(res, { success: true, data: result });
+      // Include briefing metadata
+      const briefingMeta = dailyBriefing ? {
+        briefingDate: dailyBriefing.date,
+        briefingType: dailyBriefing.type,
+        briefingTime: dailyBriefing.generatedAtLocal,
+      } : null;
+      sendJSON(res, { success: true, data: result, briefing: briefingMeta });
     } catch (e) {
       console.error('[/api/market-analysis]', e);
       sendJSON(res, { success: false, error: e.message }, 500);
     }
+    return;
+  }
+
+  if (pathname === '/api/briefing') {
+    // Return the latest daily briefing (pre-cached)
+    if (dailyBriefing && dailyBriefing.data) {
+      sendJSON(res, {
+        success: true,
+        data: dailyBriefing.data,
+        meta: {
+          date: dailyBriefing.date,
+          type: dailyBriefing.type,
+          generatedAt: dailyBriefing.generatedAt,
+          generatedAtLocal: dailyBriefing.generatedAtLocal,
+          typeLabel: dailyBriefing.type === 'pre-market' ? '盘前研判' : dailyBriefing.type === 'intraday' ? '盘中回顾' : dailyBriefing.type === 'post-market' ? '盘后总结' : '行情分析',
+        },
+      });
+    } else {
+      // No cached briefing — generate one now
+      try {
+        const brief = await generateDailyBriefing();
+        if (brief) {
+          sendJSON(res, {
+            success: true,
+            data: brief.data,
+            meta: {
+              date: brief.date,
+              type: brief.type,
+              generatedAt: brief.generatedAt,
+              generatedAtLocal: brief.generatedAtLocal,
+              typeLabel: '即时分析',
+            },
+          });
+        } else {
+          sendJSON(res, { success: false, error: '生成分析失败' }, 500);
+        }
+      } catch (e) {
+        sendJSON(res, { success: false, error: e.message }, 500);
+      }
+    }
+    return;
+  }
+
+  if (pathname === '/api/briefing/refresh') {
+    // Force regenerate briefing
+    if (req.method === 'POST') {
+      try {
+        const brief = await generateDailyBriefing();
+        if (brief) {
+          sendJSON(res, { success: true, message: '分析已更新', meta: { date: brief.date, generatedAtLocal: brief.generatedAtLocal } });
+        } else {
+          sendJSON(res, { success: false, error: '生成失败' }, 500);
+        }
+      } catch (e) {
+        sendJSON(res, { success: false, error: e.message }, 500);
+      }
+    } else {
+      sendJSON(res, { success: false, error: 'POST required' }, 405);
+    }
+    return;
+  }
+
+  if (pathname === '/api/schedule') {
+    // Return schedule config and status
+    const now = new Date();
+    sendJSON(res, {
+      success: true,
+      schedule: SCHEDULE_CONFIG,
+      lastBriefing: dailyBriefing ? {
+        date: dailyBriefing.date,
+        type: dailyBriefing.type,
+        generatedAtLocal: dailyBriefing.generatedAtLocal,
+      } : null,
+      serverTime: now.toISOString(),
+      serverTimeLocal: `${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')}`,
+    });
     return;
   }
 
@@ -1221,4 +1447,5 @@ server.listen(PORT, () => {
   console.log(`  地址: http://localhost:${PORT}`);
   console.log(`  Tushare API: ${TUSHARE_URL}`);
   console.log(`  模式: 实时数据\n`);
+  startScheduler();
 });

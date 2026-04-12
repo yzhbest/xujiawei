@@ -1602,11 +1602,14 @@ async function showMarketAnalysis(){
   status.textContent = '加载中...';
 
   try {
-    const r = await fetch('/api/market-analysis', { signal: AbortSignal.timeout(30000) });
+    // First try to get the pre-cached briefing
+    const r = await fetch('/api/briefing', { signal: AbortSignal.timeout(30000) });
     const d = await r.json();
     if (d.success && d.data) {
-      renderMarketAnalysis(d.data);
-      status.textContent = `更新于 ${new Date(d.data.timestamp).toLocaleTimeString('zh-CN')}`;
+      renderMarketAnalysis(d.data, d.meta);
+      const typeLabel = d.meta?.typeLabel || '行情分析';
+      const genTime = d.meta?.generatedAtLocal || '';
+      status.textContent = `${typeLabel} | ${genTime}`;
     } else {
       content.innerHTML = `<div style="color:var(--warn);padding:20px;text-align:center">获取数据失败: ${d.error||'未知错误'}</div>`;
       content.style.display = 'block';
@@ -1620,10 +1623,21 @@ async function showMarketAnalysis(){
   loading.style.display = 'none';
 }
 
-function renderMarketAnalysis(data) {
+function renderMarketAnalysis(data, meta) {
   const content = document.getElementById('maContent');
   const a = data.analysis;
   const b = data.breadth;
+
+  // Briefing type badge
+  const typeLabel = meta?.typeLabel || '行情分析';
+  const typeColor = meta?.type === 'pre-market' ? 'var(--gold)' : meta?.type === 'intraday' ? 'var(--accent)' : meta?.type === 'post-market' ? 'var(--down)' : 'var(--text-2)';
+  const genTime = meta?.generatedAtLocal || '';
+  const scheduleInfo = meta ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+    <span style="background:${typeColor};color:#fff;padding:3px 10px;border-radius:3px;font-size:11px;font-weight:600;">${typeLabel}</span>
+    <span style="font-size:11px;color:var(--text-3);">生成时间: ${genTime}</span>
+    <span style="font-size:10px;color:var(--text-3);margin-left:auto;">定时: 盘前8:30 | 盘中11:35 | 盘后15:10</span>
+    <button class="h-btn" style="padding:3px 8px;font-size:10px;" onclick="refreshBriefing()">刷新分析</button>
+  </div>` : '';
 
   // Market level colors
   const lvlColor = a.marketLevel === 'bullish' ? 'var(--up)' : a.marketLevel === 'bearish' ? 'var(--down)' : 'var(--gold)';
@@ -1663,6 +1677,7 @@ function renderMarketAnalysis(data) {
   ).join('');
 
   content.innerHTML = `
+    ${scheduleInfo}
     <!-- 顶部概览条 -->
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;padding:12px 16px;background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;">
       <div style="text-align:center">
@@ -1764,6 +1779,23 @@ function renderMarketAnalysis(data) {
     </div>
   `;
   content.style.display = 'block';
+}
+
+async function refreshBriefing() {
+  const status = document.getElementById('maStatus');
+  status.textContent = '正在刷新...';
+  try {
+    await fetch('/api/briefing/refresh', { method: 'POST', signal: AbortSignal.timeout(30000) });
+    // Re-fetch and render
+    const r = await fetch('/api/briefing', { signal: AbortSignal.timeout(30000) });
+    const d = await r.json();
+    if (d.success && d.data) {
+      renderMarketAnalysis(d.data, d.meta);
+      status.textContent = `${d.meta?.typeLabel||'分析'} | ${d.meta?.generatedAtLocal||''}`;
+    }
+  } catch (e) {
+    status.textContent = '刷新失败: ' + e.message;
+  }
 }
 
 // ========================================
