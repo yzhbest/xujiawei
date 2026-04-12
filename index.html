@@ -222,6 +222,38 @@ td.sector-cell { font-family: var(--font-sans); }
 .flash-down { animation: flash-down .8s ease; }
 .header::after { content:''; position:absolute; left:0; right:0; bottom:0; height:1px; background:linear-gradient(90deg, transparent, var(--accent), var(--up), var(--gold), var(--accent), transparent); opacity:.4; }
 .header { position: relative; }
+
+/* === MARKET ANALYSIS === */
+.ma-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+.ma-block { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+.ma-block-title { font-size: 12px; font-weight: 700; color: var(--accent); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+.ma-block-title::before { content: ''; width: 3px; height: 12px; border-radius: 2px; }
+.ma-block-title.t-red::before { background: var(--up); }
+.ma-block-title.t-green::before { background: var(--down); }
+.ma-block-title.t-gold::before { background: var(--gold); }
+.ma-block-title.t-blue::before { background: var(--accent); }
+.ma-idx-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; font-size: 12px; border-bottom: 1px solid rgba(26,39,68,.3); }
+.ma-idx-row:last-child { border-bottom: none; }
+.ma-idx-name { color: var(--text-2); width: 70px; }
+.ma-idx-val { font-family: var(--font-mono); font-weight: 600; width: 80px; text-align: right; }
+.ma-idx-chg { font-family: var(--font-mono); font-size: 11px; width: 60px; text-align: right; }
+.ma-idx-vol { color: var(--text-3); font-size: 10px; width: 60px; text-align: right; }
+.ma-stat-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; }
+.ma-stat-row .lbl { color: var(--text-2); }
+.ma-text-block { font-size: 12px; line-height: 1.8; color: var(--text-1); }
+.ma-tag { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 10px; margin: 2px 2px; font-weight: 500; }
+.ma-tag.hot { background: var(--up-bg); color: var(--up); border: 1px solid rgba(239,68,68,.3); }
+.ma-tag.cold { background: rgba(100,100,120,.12); color: var(--text-3); border: 1px solid rgba(100,100,120,.2); }
+.ma-tag.warn { background: rgba(249,115,22,.1); color: var(--warn); border: 1px solid rgba(249,115,22,.3); }
+.ma-pos-bar { height: 8px; background: var(--bg-tertiary); border-radius: 4px; overflow: hidden; margin: 8px 0; }
+.ma-pos-fill { height: 100%; border-radius: 4px; transition: width .6s; }
+.ma-level { font-size: 20px; font-weight: 700; font-family: var(--font-mono); }
+.ma-sector-bar { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 11px; }
+.ma-sector-name { width: 50px; color: var(--text-2); flex-shrink: 0; }
+.ma-sector-fill-wrap { flex: 1; height: 5px; background: var(--bg-tertiary); border-radius: 3px; overflow: hidden; }
+.ma-sector-fill { height: 100%; border-radius: 3px; }
+.ma-sector-val { width: 50px; text-align: right; font-family: var(--font-mono); font-size: 10px; }
+.ma-full-width { grid-column: 1 / -1; }
 </style>
 </head>
 <body>
@@ -247,6 +279,7 @@ td.sector-cell { font-family: var(--font-sans); }
   <div class="h-right">
     <span class="h-date" id="dateDisplay"></span>
     <span class="h-clock" id="clockDisplay">09:25:00</span>
+    <button class="h-btn" onclick="showMarketAnalysis()">📋 行情分析</button>
     <button class="h-btn" onclick="showBacktest()">📊 策略回测</button>
     <button class="h-btn" onclick="toggleTradingPanel()">💹 交易面板</button>
   </div>
@@ -502,6 +535,24 @@ td.sector-cell { font-family: var(--font-sans); }
         </div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- Market Analysis Modal -->
+<div class="modal-overlay" id="marketAnalysisModal">
+  <div class="modal-card" style="width:960px;max-width:95vw;max-height:90vh;overflow-y:auto;">
+    <h3 style="display:flex;align-items:center;gap:8px;">
+      📋 每日行情分析
+      <span style="font-size:11px;color:var(--text-3);font-weight:400;margin-left:auto" id="maStatus">就绪</span>
+      <button class="btn-cancel" style="padding:4px 12px;font-size:11px" onclick="hideModal('marketAnalysisModal')">关闭</button>
+    </h3>
+    <div id="maLoading" style="display:none;text-align:center;padding:40px;color:var(--text-3);">
+      <div style="font-size:14px;margin-bottom:8px;">正在获取市场数据并分析...</div>
+      <div style="width:200px;height:4px;background:var(--bg-primary);border-radius:2px;margin:0 auto;overflow:hidden;">
+        <div style="width:60%;height:100%;background:var(--accent);border-radius:2px;animation:ticker-scroll 1.5s linear infinite;"></div>
+      </div>
+    </div>
+    <div id="maContent" style="display:none;"></div>
   </div>
 </div>
 
@@ -1532,6 +1583,184 @@ function renderEquityCurve(curve){
 
 function showBacktest(){
   document.getElementById('backtestModal').classList.add('show');
+}
+
+// ========================================
+// MARKET ANALYSIS
+// ========================================
+async function showMarketAnalysis(){
+  showModal('marketAnalysisModal');
+  const loading = document.getElementById('maLoading');
+  const content = document.getElementById('maContent');
+  const status = document.getElementById('maStatus');
+
+  loading.style.display = 'block';
+  content.style.display = 'none';
+  status.textContent = '加载中...';
+
+  try {
+    const r = await fetch('/api/market-analysis', { signal: AbortSignal.timeout(30000) });
+    const d = await r.json();
+    if (d.success && d.data) {
+      renderMarketAnalysis(d.data);
+      status.textContent = `更新于 ${new Date(d.data.timestamp).toLocaleTimeString('zh-CN')}`;
+    } else {
+      content.innerHTML = `<div style="color:var(--warn);padding:20px;text-align:center">获取数据失败: ${d.error||'未知错误'}</div>`;
+      content.style.display = 'block';
+      status.textContent = '失败';
+    }
+  } catch (e) {
+    content.innerHTML = `<div style="color:var(--warn);padding:20px;text-align:center">请求失败: ${e.message}<br><span style="font-size:11px;color:var(--text-3)">请确保后端服务已启动且处于实时模式</span></div>`;
+    content.style.display = 'block';
+    status.textContent = '失败';
+  }
+  loading.style.display = 'none';
+}
+
+function renderMarketAnalysis(data) {
+  const content = document.getElementById('maContent');
+  const a = data.analysis;
+  const b = data.breadth;
+
+  // Market level colors
+  const lvlColor = a.marketLevel === 'bullish' ? 'var(--up)' : a.marketLevel === 'bearish' ? 'var(--down)' : 'var(--gold)';
+  const lvlText = a.marketLevel === 'bullish' ? '偏多' : a.marketLevel === 'bearish' ? '偏空' : '震荡';
+  const posColor = a.positionLevel >= 60 ? 'var(--up)' : a.positionLevel >= 40 ? 'var(--gold)' : 'var(--down)';
+
+  // Indices HTML
+  const idxHtml = data.indices.filter(i => i.close > 0).map(i => {
+    const cls = i.pctChg > 0 ? 'text-up' : i.pctChg < 0 ? 'text-down' : 'text-flat';
+    const prefix = i.pctChg > 0 ? '+' : '';
+    return `<div class="ma-idx-row">
+      <span class="ma-idx-name">${i.name}</span>
+      <span class="ma-idx-val ${cls}">${i.close.toFixed(2)}</span>
+      <span class="ma-idx-chg ${cls}">${prefix}${i.pctChg}%</span>
+      <span class="ma-idx-vol">${i.amount}亿</span>
+    </div>`;
+  }).join('');
+
+  // Sector ranking HTML
+  const sectorHtml = data.sectorRanking.map(s => {
+    const w = Math.min(Math.abs(s.avgChg) * 15, 100);
+    const color = s.avgChg >= 0 ? 'var(--up)' : 'var(--down)';
+    const prefix = s.avgChg > 0 ? '+' : '';
+    return `<div class="ma-sector-bar">
+      <span class="ma-sector-name">${s.sector}</span>
+      <div class="ma-sector-fill-wrap"><div class="ma-sector-fill" style="width:${w}%;background:${color}"></div></div>
+      <span class="ma-sector-val" style="color:${color}">${prefix}${s.avgChg}%</span>
+    </div>`;
+  }).join('');
+
+  // Risk warnings HTML
+  const riskHtml = a.riskWarnings.map(w => `<span class="ma-tag warn">${w}</span>`).join('');
+
+  // Hot limit sectors
+  const hotLimitHtml = data.hotLimitSectors.map(s =>
+    `<span class="ma-tag hot">${s.sector} ${s.count}家涨停</span>`
+  ).join('');
+
+  content.innerHTML = `
+    <!-- 顶部概览条 -->
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;padding:12px 16px;background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;">
+      <div style="text-align:center">
+        <div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:1px;">市场判断</div>
+        <div class="ma-level" style="color:${lvlColor}">${lvlText}</div>
+      </div>
+      <div style="width:1px;height:40px;background:var(--border)"></div>
+      <div style="text-align:center">
+        <div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:1px;">建议仓位</div>
+        <div class="ma-level" style="color:${posColor}">${a.positionLevel}%</div>
+      </div>
+      <div style="width:1px;height:40px;background:var(--border)"></div>
+      <div style="text-align:center">
+        <div style="font-size:10px;color:var(--text-3);letter-spacing:1px;">涨/跌</div>
+        <div style="font-size:16px;font-weight:700;font-family:var(--font-mono);">
+          <span class="text-up">${b.upCount}</span><span style="color:var(--text-3)"> / </span><span class="text-down">${b.downCount}</span>
+        </div>
+      </div>
+      <div style="width:1px;height:40px;background:var(--border)"></div>
+      <div style="text-align:center">
+        <div style="font-size:10px;color:var(--text-3);letter-spacing:1px;">涨停/跌停</div>
+        <div style="font-size:16px;font-weight:700;font-family:var(--font-mono);">
+          <span class="text-up">${b.limitUpCount}</span><span style="color:var(--text-3)"> / </span><span class="text-down">${b.limitDownCount}</span>
+        </div>
+      </div>
+      <div style="width:1px;height:40px;background:var(--border)"></div>
+      <div style="text-align:center">
+        <div style="font-size:10px;color:var(--text-3);letter-spacing:1px;">成交额</div>
+        <div style="font-size:16px;font-weight:700;font-family:var(--font-mono);color:var(--gold)">${b.totalAmountYi}亿</div>
+      </div>
+      <div style="width:1px;height:40px;background:var(--border)"></div>
+      <div style="text-align:center">
+        <div style="font-size:10px;color:var(--text-3);letter-spacing:1px;">北向资金</div>
+        <div style="font-size:16px;font-weight:700;font-family:var(--font-mono);color:${data.northbound.northMoney>=0?'var(--up)':'var(--down)'}">
+          ${data.northbound.northMoney>=0?'+':''}${data.northbound.northMoney}亿
+        </div>
+      </div>
+    </div>
+
+    <div class="ma-grid">
+      <!-- 指数行情 -->
+      <div class="ma-block">
+        <div class="ma-block-title t-blue">A股主要指数</div>
+        ${idxHtml}
+      </div>
+
+      <!-- 板块排名 -->
+      <div class="ma-block">
+        <div class="ma-block-title t-gold">板块涨跌排名</div>
+        ${sectorHtml}
+      </div>
+
+      <!-- 大盘预判 -->
+      <div class="ma-block ma-full-width">
+        <div class="ma-block-title t-red">大盘预判</div>
+        <div class="ma-text-block">${a.marketForecast}</div>
+      </div>
+
+      <!-- 市场环境 -->
+      <div class="ma-block">
+        <div class="ma-block-title t-green">市场环境</div>
+        <div class="ma-text-block">${a.marketEnv}</div>
+        <div style="margin-top:10px">
+          <div class="ma-stat-row"><span class="lbl">平均PE</span><span>${b.avgPE}</span></div>
+          <div class="ma-stat-row"><span class="lbl">平均PB</span><span>${b.avgPB}</span></div>
+          <div class="ma-stat-row"><span class="lbl">平均换手率</span><span>${b.avgTurnover}%</span></div>
+          <div class="ma-stat-row"><span class="lbl">涨跌比</span><span style="color:${b.upDownRatio>1?'var(--up)':'var(--down)'}">${b.upDownRatio}</span></div>
+        </div>
+      </div>
+
+      <!-- 热点方向 -->
+      <div class="ma-block">
+        <div class="ma-block-title t-red">热点方向</div>
+        <div class="ma-text-block">${a.hotDirection}</div>
+        <div style="margin-top:10px">${hotLimitHtml}</div>
+      </div>
+
+      <!-- 风险预警 -->
+      <div class="ma-block">
+        <div class="ma-block-title t-gold">风险预警</div>
+        <div style="line-height:2">${riskHtml}</div>
+      </div>
+
+      <!-- 仓位建议 -->
+      <div class="ma-block">
+        <div class="ma-block-title t-green">仓位建议</div>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+          <span style="font-size:28px;font-weight:700;font-family:var(--font-mono);color:${posColor}">${a.positionLevel}%</span>
+          <div style="flex:1">
+            <div class="ma-pos-bar"><div class="ma-pos-fill" style="width:${a.positionLevel}%;background:${posColor}"></div></div>
+          </div>
+        </div>
+        <div class="ma-text-block">${a.positionAdvice}</div>
+      </div>
+    </div>
+
+    <div style="font-size:10px;color:var(--text-3);text-align:center;padding:8px 0;">
+      分析基于 Tushare 实时数据，仅供参考，不构成投资建议。数据日期: ${data.tradeDate}
+    </div>
+  `;
+  content.style.display = 'block';
 }
 
 // ========================================

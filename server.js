@@ -697,6 +697,331 @@ async function runBacktest(config) {
   };
 }
 
+// ============================================
+// MARKET ANALYSIS ENGINE
+// ============================================
+
+async function fetchMarketAnalysis() {
+  const cacheKey = 'market_analysis';
+  const cached = getCached(cacheKey, 300000); // 5min cache
+  if (cached) return cached;
+
+  // Try today first, fallback to most recent trade date if no data
+  let tradeDate = getTradeDate();
+  const recentDates = await getRecentTradeDates(5);
+
+  console.log(`[MarketAnalysis] Trying trade_date=${tradeDate}...`);
+
+  // Quick check: does today have daily data?
+  let dailyCheck = [];
+  try {
+    const checkRes = await tusharePost('daily', { trade_date: tradeDate, ts_code: '000001.SZ' }, 'ts_code,close');
+    dailyCheck = zipFieldsItems(checkRes);
+  } catch (e) { /* ignore */ }
+
+  if (dailyCheck.length === 0 && recentDates.length > 0) {
+    tradeDate = recentDates[0];
+    console.log(`[MarketAnalysis] No data for today, falling back to ${tradeDate}`);
+  }
+
+  const prevDates = recentDates.filter(d => d < tradeDate).slice(0, 3);
+
+  console.log(`[MarketAnalysis] Fetching data for ${tradeDate}...`);
+
+  // index_daily requires ts_code, so fetch each index individually
+  const indexCodes = [
+    { code: '000001.SH', name: '上证指数' },
+    { code: '399001.SZ', name: '深证成指' },
+    { code: '399006.SZ', name: '创业板指' },
+    { code: '000016.SH', name: '上证50' },
+    { code: '000905.SH', name: '中证500' },
+    { code: '399673.SZ', name: '创业板50' },
+  ];
+
+  // Fetch index data + other market data in parallel
+  const indexPromises = indexCodes.map(ic =>
+    tusharePost('index_daily', { ts_code: ic.code, trade_date: tradeDate }, 'ts_code,trade_date,close,open,high,low,pre_close,change,pct_chg,vol,amount')
+  );
+  const indexPrevPromises = prevDates[0] ? indexCodes.slice(0, 3).map(ic =>
+    tusharePost('index_daily', { ts_code: ic.code, trade_date: prevDates[0] }, 'ts_code,close,pct_chg,vol,amount')
+  ) : [];
+
+  const [
+    ...allResults
+  ] = await Promise.allSettled([
+    ...indexPromises,           // 0-5: index today
+    ...indexPrevPromises,       // 6-8: index prev (first 3)
+    tusharePost('moneyflow_hsgt', { trade_date: tradeDate }, 'trade_date,ggt_ss,ggt_sz,hgt,sgt,north_money,south_money'),
+    tusharePost('limit_list_d', { trade_date: tradeDate }, 'ts_code,trade_date,name,industry,limit,pct_chg,fd_amount,first_time,last_time'),
+    tusharePost('daily', { trade_date: tradeDate }, 'ts_code,open,high,low,close,pre_close,pct_chg,vol,amount'),
+    tusharePost('daily_basic', { trade_date: tradeDate }, 'ts_code,pe,pb,total_mv,turnover_rate'),
+  ]);
+
+  // Parse index results
+  const idxOffset = indexCodes.length;
+  const prevOffset = idxOffset + indexPrevPromises.length;
+  const indexToday = [];
+  for (let i = 0; i < indexCodes.length; i++) {
+    const r = allResults[i];
+    if (r.status === 'fulfilled') {
+      const items = zipFieldsItems(r.value);
+      if (items.length > 0) indexToday.push(items[0]);
+    }
+  }
+  const indexPrev = [];
+  for (let i = idxOffset; i < idxOffset + indexPrevPromises.length; i++) {
+    const r = allResults[i];
+    if (r.status === 'fulfilled') {
+      const items = zipFieldsItems(r.value);
+      if (items.length > 0) indexPrev.push(items[0]);
+    }
+  }
+
+  const hsgtRes = allResults[prevOffset];
+  const limitRes = allResults[prevOffset + 1];
+  const dailyRes = allResults[prevOffset + 2];
+  const dailyBasicRes = allResults[prevOffset + 3];
+
+  // Parse results
+  const hsgtData = hsgtRes.status === 'fulfilled' ? zipFieldsItems(hsgtRes.value) : [];
+  const limitList = limitRes.status === 'fulfilled' ? zipFieldsItems(limitRes.value) : [];
+  const dailyList = dailyRes.status === 'fulfilled' ? zipFieldsItems(dailyRes.value) : [];
+  const basicList = dailyBasicRes.status === 'fulfilled' ? zipFieldsItems(dailyBasicRes.value) : [];
+
+  // === 1. Index analysis (大盘分析) ===
+  const indexMap = {};
+  indexToday.forEach(idx => { indexMap[idx.ts_code] = idx; });
+  const indexPrevMap = {};
+  indexPrev.forEach(idx => { indexPrevMap[idx.ts_code] = idx; });
+
+  const indicesInfo = indexCodes.map(mi => {
+    const today = indexMap[mi.code];
+    const prev = indexPrevMap[mi.code];
+    if (!today) return { ...mi, close: 0, change: 0, pctChg: 0, vol: 0, amount: 0, trend: '无数据' };
+    return {
+      ...mi,
+      close: today.close || 0,
+      open: today.open || 0,
+      high: today.high || 0,
+      low: today.low || 0,
+      preClose: today.pre_close || 0,
+      change: today.change || 0,
+      pctChg: +(today.pct_chg || 0).toFixed(2),
+      vol: today.vol || 0,
+      amount: today.amount ? +(today.amount / 100000).toFixed(0) : 0, // 亿元
+      prevVol: prev ? prev.vol : 0,
+      prevAmount: prev ? prev.amount : 0,
+      trend: (today.pct_chg || 0) > 0.5 ? '偏多' : (today.pct_chg || 0) < -0.5 ? '偏空' : '震荡',
+    };
+  });
+
+  // === 2. Market breadth (市场宽度) ===
+  let upCount = 0, downCount = 0, flatCount = 0, totalStocks = 0;
+  let totalVol = 0, totalAmount = 0;
+  dailyList.forEach(d => {
+    totalStocks++;
+    totalVol += d.vol || 0;
+    totalAmount += d.amount || 0;
+    if (d.pct_chg > 0) upCount++;
+    else if (d.pct_chg < 0) downCount++;
+    else flatCount++;
+  });
+  const upDownRatio = downCount > 0 ? +(upCount / downCount).toFixed(2) : upCount;
+  const totalAmountYi = +(totalAmount / 100000).toFixed(0); // 亿元
+
+  // === 3. Limit up/down analysis (涨跌停分析) ===
+  const limitUpList = limitList.filter(l => l.limit === 'U' || l.pct_chg >= 9.8);
+  const limitDownList = limitList.filter(l => l.limit === 'D' || l.pct_chg <= -9.8);
+  const limitUpCount = limitUpList.length;
+  const limitDownCount = limitDownList.length;
+
+  // Limit up by industry/sector
+  const limitUpSectors = {};
+  limitUpList.forEach(l => {
+    const sec = getSector(l.industry || '');
+    if (!limitUpSectors[sec]) limitUpSectors[sec] = { count: 0, stocks: [] };
+    limitUpSectors[sec].count++;
+    limitUpSectors[sec].stocks.push({ code: l.ts_code, name: l.name, industry: l.industry });
+  });
+  const hotLimitSectors = Object.entries(limitUpSectors)
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, 5)
+    .map(([sec, d]) => ({ sector: sec, count: d.count, stocks: d.stocks.slice(0, 3) }));
+
+  // === 4. Northbound capital flow (北向资金) ===
+  const hsgt = hsgtData[0] || {};
+  const northMoney = hsgt.north_money ? +(hsgt.north_money / 10000).toFixed(2) : 0; // 万元->亿元
+  const hgtFlow = hsgt.hgt ? +(hsgt.hgt / 10000).toFixed(2) : 0;
+  const sgtFlow = hsgt.sgt ? +(hsgt.sgt / 10000).toFixed(2) : 0;
+
+  // === 5. Sector rotation analysis (板块轮动) ===
+  const basicMap = await fetchStockBasicMap();
+  const sectorStats = {};
+  dailyList.forEach(d => {
+    const info = basicMap[d.ts_code];
+    if (!info) return;
+    const sector = getSector(info.industry || '');
+    if (!sectorStats[sector]) sectorStats[sector] = { up: 0, down: 0, total: 0, sumChg: 0, vol: 0, amount: 0 };
+    sectorStats[sector].total++;
+    sectorStats[sector].sumChg += (d.pct_chg || 0);
+    sectorStats[sector].vol += (d.vol || 0);
+    sectorStats[sector].amount += (d.amount || 0);
+    if (d.pct_chg > 0) sectorStats[sector].up++;
+    else sectorStats[sector].down++;
+  });
+
+  const sectorRanking = Object.entries(sectorStats)
+    .filter(([, d]) => d.total >= 5) // only meaningful sectors
+    .map(([sec, d]) => ({
+      sector: sec,
+      avgChg: +(d.sumChg / d.total).toFixed(2),
+      upRatio: +(d.up / d.total * 100).toFixed(1),
+      total: d.total,
+      amount: +(d.amount / 100000).toFixed(0), // 亿
+    }))
+    .sort((a, b) => b.avgChg - a.avgChg);
+
+  // === 6. Valuation overview (估值概览) ===
+  let sumPE = 0, countPE = 0, sumPB = 0, countPB = 0, sumTurnover = 0, countTurnover = 0;
+  basicList.forEach(b => {
+    if (b.pe && b.pe > 0 && b.pe < 500) { sumPE += b.pe; countPE++; }
+    if (b.pb && b.pb > 0 && b.pb < 50) { sumPB += b.pb; countPB++; }
+    if (b.turnover_rate) { sumTurnover += b.turnover_rate; countTurnover++; }
+  });
+  const avgPE = countPE > 0 ? +(sumPE / countPE).toFixed(1) : 0;
+  const avgPB = countPB > 0 ? +(sumPB / countPB).toFixed(2) : 0;
+  const avgTurnover = countTurnover > 0 ? +(sumTurnover / countTurnover).toFixed(2) : 0;
+
+  // === 7. Generate analysis conclusions ===
+  const sh = indicesInfo.find(i => i.code === '000001.SH') || {};
+  const sz = indicesInfo.find(i => i.code === '399001.SZ') || {};
+  const cy = indicesInfo.find(i => i.code === '399006.SZ') || {};
+
+  // 大盘预判
+  let marketForecast = '';
+  let marketLevel = 'neutral'; // bullish / bearish / neutral
+  const shChg = sh.pctChg || 0;
+  if (shChg > 1 && upDownRatio > 2 && limitUpCount > limitDownCount * 3) {
+    marketForecast = '大盘强势上攻，多头氛围浓厚。量价齐升格局显著，短线或延续向上势头。建议积极参与，关注放量突破板块。';
+    marketLevel = 'bullish';
+  } else if (shChg > 0.3 && upDownRatio > 1.2) {
+    marketForecast = '大盘温和走高，市场情绪偏暖。个股分化明显，结构性行情为主。建议精选热点方向，控制仓位参与。';
+    marketLevel = 'bullish';
+  } else if (shChg < -1 && upDownRatio < 0.5 && limitDownCount > limitUpCount) {
+    marketForecast = '大盘明显调整，空头占据主导。市场恐慌情绪升温，建议观望为主，等待企稳信号后再入场。';
+    marketLevel = 'bearish';
+  } else if (shChg < -0.3 && upDownRatio < 0.8) {
+    marketForecast = '大盘偏弱震荡，赚钱效应一般。题材轮动较快，持续性不足。建议轻仓操作，重点关注强势板块补跌风险。';
+    marketLevel = 'bearish';
+  } else {
+    marketForecast = '大盘窄幅震荡，多空分歧较大。市场处于方向选择期，量能是关键观察指标。建议保持灵活，等待突破方向明确后跟进。';
+    marketLevel = 'neutral';
+  }
+
+  // 市场环境
+  let marketEnv = '';
+  if (totalAmountYi > 12000) {
+    marketEnv = `两市成交${totalAmountYi}亿，量能充沛，市场活跃度高。`;
+  } else if (totalAmountYi > 8000) {
+    marketEnv = `两市成交${totalAmountYi}亿，量能适中，市场参与意愿尚可。`;
+  } else if (totalAmountYi > 5000) {
+    marketEnv = `两市成交${totalAmountYi}亿，量能偏低，市场观望情绪浓厚。`;
+  } else {
+    marketEnv = `两市成交${totalAmountYi}亿，量能萎缩明显，市场人气低迷。`;
+  }
+  marketEnv += ` 上涨${upCount}家/下跌${downCount}家，涨跌比${upDownRatio}。`;
+  marketEnv += ` 涨停${limitUpCount}家，跌停${limitDownCount}家。`;
+  if (northMoney !== 0) {
+    marketEnv += ` 北向资金${northMoney > 0 ? '净流入' : '净流出'}${Math.abs(northMoney).toFixed(2)}亿。`;
+  }
+
+  // 热点方向
+  const hotSectors = sectorRanking.slice(0, 3);
+  const coldSectors = sectorRanking.slice(-2);
+  let hotDirection = '';
+  if (hotSectors.length > 0) {
+    hotDirection = `今日领涨板块: ${hotSectors.map(s => `${s.sector}(+${s.avgChg}%)`).join('、')}。`;
+    if (hotLimitSectors.length > 0) {
+      hotDirection += ` 涨停集中方向: ${hotLimitSectors.map(s => `${s.sector}(${s.count}家)`).join('、')}。`;
+    }
+  }
+  if (coldSectors.length > 0) {
+    hotDirection += ` 弱势板块: ${coldSectors.map(s => `${s.sector}(${s.avgChg}%)`).join('、')}。`;
+  }
+
+  // 风险预警
+  const riskWarnings = [];
+  if (totalAmountYi < 6000) riskWarnings.push('成交量持续萎缩，市场流动性不足');
+  if (limitDownCount > 30) riskWarnings.push(`跌停股达${limitDownCount}家，恐慌情绪蔓延`);
+  if (upDownRatio < 0.3) riskWarnings.push('涨跌比严重失衡，市场极端弱势');
+  if (northMoney < -50) riskWarnings.push(`北向资金大幅流出${Math.abs(northMoney).toFixed(1)}亿，外资态度转空`);
+  if (avgPE > 30) riskWarnings.push(`全市场平均PE ${avgPE}倍，估值偏高`);
+  if (shChg < -2) riskWarnings.push('上证指数单日跌幅超2%，注意系统性风险');
+  if (cy.pctChg < -3) riskWarnings.push('创业板跌幅较大，成长股承压明显');
+  if (riskWarnings.length === 0) {
+    riskWarnings.push('当前市场未触发明显风险信号，但需持续关注量价变化');
+  }
+
+  // 仓位建议
+  let positionAdvice = '';
+  let positionLevel = 0; // 0-100
+  if (marketLevel === 'bullish' && upDownRatio > 1.5 && totalAmountYi > 8000) {
+    positionLevel = 80;
+    positionAdvice = '市场多头格局确立，建议仓位70-80%。重点配置主线热点板块，适当参与强势个股回调买入机会。';
+  } else if (marketLevel === 'bullish') {
+    positionLevel = 60;
+    positionAdvice = '市场偏暖但力度有限，建议仓位50-60%。聚焦确定性较高的主线方向，避免追涨过热标的。';
+  } else if (marketLevel === 'bearish' && upDownRatio < 0.5) {
+    positionLevel = 20;
+    positionAdvice = '市场弱势明显，建议仓位控制在20%以内。以防守为主，仅保留核心持仓，避免盲目抄底。';
+  } else if (marketLevel === 'bearish') {
+    positionLevel = 35;
+    positionAdvice = '市场偏弱运行，建议仓位30-40%。降低进攻性，关注超跌反弹机会，严控单票仓位。';
+  } else {
+    positionLevel = 50;
+    positionAdvice = '市场方向不明，建议仓位50%左右。均衡配置，灵活应对。等待放量突破或缩量回调后的方向确认。';
+  }
+
+  const result = {
+    tradeDate,
+    timestamp: new Date().toISOString(),
+    indices: indicesInfo,
+    breadth: {
+      totalStocks,
+      upCount,
+      downCount,
+      flatCount,
+      upDownRatio,
+      totalAmountYi,
+      limitUpCount,
+      limitDownCount,
+      avgPE,
+      avgPB,
+      avgTurnover,
+    },
+    northbound: {
+      northMoney,
+      hgtFlow,
+      sgtFlow,
+    },
+    sectorRanking: sectorRanking.slice(0, 10),
+    hotLimitSectors,
+    analysis: {
+      marketForecast,
+      marketLevel,
+      marketEnv,
+      hotDirection,
+      riskWarnings,
+      positionAdvice,
+      positionLevel,
+    },
+  };
+
+  setCache(cacheKey, result);
+  console.log(`[MarketAnalysis] Done. indices=${indicesInfo.length}, daily=${dailyList.length}, limits=${limitList.length}`);
+  return result;
+}
+
 function sendJSON(res, data, status = 200) {
   const body = JSON.stringify(data);
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
@@ -756,6 +1081,17 @@ const server = http.createServer(async (req, res) => {
       });
     } catch (e) {
       console.error('[/api/stocks]', e);
+      sendJSON(res, { success: false, error: e.message }, 500);
+    }
+    return;
+  }
+
+  if (pathname === '/api/market-analysis') {
+    try {
+      const result = await fetchMarketAnalysis();
+      sendJSON(res, { success: true, data: result });
+    } catch (e) {
+      console.error('[/api/market-analysis]', e);
       sendJSON(res, { success: false, error: e.message }, 500);
     }
     return;
