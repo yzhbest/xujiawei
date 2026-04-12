@@ -1,0 +1,9 @@
+{
+  "name": "ai-auction-stock-selector",
+  "version": "3.2.0",
+  "description": "AI智能竞价选股系统",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

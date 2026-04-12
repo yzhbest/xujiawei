@@ -1442,7 +1442,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  AI智能竞价选股系统 - 服务已启动`);
   console.log(`  地址: http://localhost:${PORT}`);
   console.log(`  Tushare API: ${TUSHARE_URL}`);
