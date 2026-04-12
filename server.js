@@ -125,7 +125,23 @@ async function fetchStockBasicMap() {
 }
 
 async function fetchAllStocks(params = {}) {
-  const tradeDate = getTradeDate();
+  let tradeDate = getTradeDate();
+
+  // Check if today is a trading day; if not, fallback to most recent trading day
+  try {
+    const recentDates = await getRecentTradeDates(3);
+    if (recentDates.length > 0 && recentDates[0] !== tradeDate) {
+      // Today's date is not in the recent trade dates list, meaning it's not a trading day
+      // Check if today's date is greater than the most recent trade date (weekend/holiday)
+      if (tradeDate > recentDates[0]) {
+        tradeDate = recentDates[0];
+        console.log(`[fetchAllStocks] Non-trading day detected, falling back to ${tradeDate}`);
+      }
+    }
+  } catch (e) {
+    console.warn('[fetchAllStocks] Trade date check failed:', e.message);
+  }
+
   const prevDates = getPrevTradeDates(3);
 
   console.log(`[fetchAllStocks] trade_date=${tradeDate}, fetching data...`);
@@ -290,7 +306,7 @@ async function fetchAllStocks(params = {}) {
 
   // Limit results
   const topN = params.top_n || 50;
-  return stocks.slice(0, topN);
+  return { stocks: stocks.slice(0, topN), tradeDate };
 }
 
 // Apply AI scoring (same algorithm as frontend)
@@ -1063,7 +1079,9 @@ const server = http.createServer(async (req, res) => {
         exclude_limit_up: url.searchParams.get('exclude_limit_up') === 'true',
         top_n: parseInt(url.searchParams.get('top_n') || '80'),
       };
-      const rawStocks = await fetchAllStocks(params);
+      const result = await fetchAllStocks(params);
+      const rawStocks = result.stocks;
+      const actualTradeDate = result.tradeDate;
       const sectorHeat = computeSectorHeat(rawStocks);
       const scored = applyAIScoring(rawStocks, sectorHeat);
 
@@ -1076,7 +1094,7 @@ const server = http.createServer(async (req, res) => {
         data: filtered,
         count: filtered.length,
         timestamp: new Date().toISOString(),
-        tradeDate: getTradeDate(),
+        tradeDate: actualTradeDate,
         sectorHeat,
       });
     } catch (e) {

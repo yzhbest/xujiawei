@@ -681,7 +681,10 @@ async function fetchLiveStocks(){
     if(d.success && d.data){
       State.apiConnected = true;
       State.lastApiTs = d.timestamp;
-      updateConnStatus(true, `实时 (${d.count}只)`);
+      // Show actual trade date in status
+      const td = d.tradeDate || '';
+      const tdLabel = td ? `${td.slice(0,4)}-${td.slice(4,6)}-${td.slice(6)}` : '';
+      updateConnStatus(true, `实时 ${tdLabel} (${d.count}只)`);
       // merge autoBuy state from current stocks
       const abMap = {};
       State.stocks.forEach(s=>{if(s.autoBuy) abMap[s.code]=true;});
