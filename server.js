@@ -135,16 +135,25 @@ async function fetchStockBasicMap() {
 async function fetchAllStocks(params = {}) {
   let tradeDate = getTradeDate();
 
-  // Check if today is a trading day; if not, fallback to most recent trading day
+  // Check if today has actual data; if not, fallback to most recent trading day with data
   try {
     const recentDates = await getRecentTradeDates(3);
-    if (recentDates.length > 0 && recentDates[0] !== tradeDate) {
-      // Today's date is not in the recent trade dates list, meaning it's not a trading day
-      // Check if today's date is greater than the most recent trade date (weekend/holiday)
-      if (tradeDate > recentDates[0]) {
-        tradeDate = recentDates[0];
-        console.log(`[fetchAllStocks] Non-trading day detected, falling back to ${tradeDate}`);
+    // Quick check: does today have daily data?
+    let hasTodayData = false;
+    try {
+      const checkRes = await tusharePost('daily', { trade_date: tradeDate, ts_code: '000001.SZ' }, 'ts_code,close');
+      hasTodayData = zipFieldsItems(checkRes).length > 0;
+    } catch (e) { /* ignore */ }
+
+    if (!hasTodayData) {
+      const fallbackDates = recentDates.filter(d => d < tradeDate);
+      if (fallbackDates.length > 0) {
+        tradeDate = fallbackDates[0];
+        console.log(`[fetchAllStocks] No daily data for today, falling back to ${tradeDate}`);
       }
+    } else if (recentDates.length > 0 && !recentDates.includes(tradeDate) && tradeDate > recentDates[0]) {
+      tradeDate = recentDates[0];
+      console.log(`[fetchAllStocks] Non-trading day detected, falling back to ${tradeDate}`);
     }
   } catch (e) {
     console.warn('[fetchAllStocks] Trade date check failed:', e.message);
@@ -743,9 +752,15 @@ async function fetchMarketAnalysis() {
     dailyCheck = zipFieldsItems(checkRes);
   } catch (e) { /* ignore */ }
 
-  if (dailyCheck.length === 0 && recentDates.length > 0) {
-    tradeDate = recentDates[0];
-    console.log(`[MarketAnalysis] No data for today, falling back to ${tradeDate}`);
+  if (dailyCheck.length === 0) {
+    // Filter out today — it may be in trade_cal but daily data not yet available (market still open)
+    const fallbackDates = recentDates.filter(d => d < tradeDate);
+    if (fallbackDates.length > 0) {
+      tradeDate = fallbackDates[0];
+      console.log(`[MarketAnalysis] No data for today, falling back to ${tradeDate}`);
+    } else {
+      console.log(`[MarketAnalysis] No data for today and no fallback dates available`);
+    }
   }
 
   const prevDates = recentDates.filter(d => d < tradeDate).slice(0, 3);
