@@ -45,9 +45,17 @@ function zipFieldsItems(data) {
 // ============================================
 // HELPERS
 // ============================================
-function getTradeDate() {
-  // Use today's date in YYYYMMDD format
+
+// Get current time in Beijing timezone (UTC+8)
+function getBeijingNow() {
   const now = new Date();
+  const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+  return new Date(utc + 8 * 3600000);
+}
+
+function getTradeDate() {
+  // Use today's date in YYYYMMDD format (Beijing time)
+  const now = getBeijingNow();
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, '0');
   const d = String(now.getDate()).padStart(2, '0');
@@ -56,7 +64,7 @@ function getTradeDate() {
 
 function getPrevTradeDates(n = 5) {
   const dates = [];
-  const now = new Date();
+  const now = getBeijingNow();
   for (let i = 1; i <= n + 10; i++) {
     const d = new Date(now);
     d.setDate(d.getDate() - i);
@@ -1043,7 +1051,9 @@ async function fetchMarketAnalysis() {
 // ============================================
 
 // Persistent storage for daily briefing (survives cache expiry)
-let dailyBriefing = null; // { date, generatedAt, data }
+// Store up to 3 briefings per day: pre-market, intraday, post-market
+let dailyBriefings = {}; // { 'pre-market': {...}, 'intraday': {...}, 'post-market': {...} }
+let dailyBriefing = null; // Latest generated briefing (for backward compat)
 const BRIEFING_FILE = path.join(__dirname, '.daily_briefing.json');
 
 // Load saved briefing from disk on startup
@@ -1051,40 +1061,81 @@ function loadBriefingFromDisk() {
   try {
     if (fs.existsSync(BRIEFING_FILE)) {
       const raw = fs.readFileSync(BRIEFING_FILE, 'utf-8');
-      dailyBriefing = JSON.parse(raw);
-      console.log(`[Scheduler] Loaded saved briefing for ${dailyBriefing.date}, generated at ${dailyBriefing.generatedAt}`);
+      const parsed = JSON.parse(raw);
+      // Support new multi-briefing format
+      if (parsed._multi) {
+        dailyBriefings = parsed.briefings || {};
+        // Set dailyBriefing to the latest one
+        const latest = parsed.latest;
+        dailyBriefing = latest ? dailyBriefings[latest] || null : null;
+        console.log(`[Scheduler] Loaded multi-briefing: ${Object.keys(dailyBriefings).join(', ')}`);
+      } else {
+        // Legacy single-briefing format
+        dailyBriefing = parsed;
+        if (dailyBriefing && dailyBriefing.type) {
+          dailyBriefings[dailyBriefing.type] = dailyBriefing;
+        }
+        console.log(`[Scheduler] Loaded saved briefing for ${dailyBriefing.date}, generated at ${dailyBriefing.generatedAt}`);
+      }
     }
   } catch (e) {
     console.warn('[Scheduler] Failed to load saved briefing:', e.message);
   }
 }
 
-// Save briefing to disk
+// Save briefing to disk (multi-briefing format)
 function saveBriefingToDisk(briefing) {
   try {
-    fs.writeFileSync(BRIEFING_FILE, JSON.stringify(briefing), 'utf-8');
+    if (briefing && briefing.type) {
+      dailyBriefings[briefing.type] = briefing;
+    }
+    fs.writeFileSync(BRIEFING_FILE, JSON.stringify({
+      _multi: true,
+      latest: briefing ? briefing.type : null,
+      briefings: dailyBriefings,
+    }), 'utf-8');
   } catch (e) {
     console.warn('[Scheduler] Failed to save briefing:', e.message);
   }
 }
 
+// Determine which briefing type to show based on current time
+// 8:35~12:34 → pre-market (盘前研判)
+// 12:35~17:59 → intraday (盘中回顾)
+// 18:00~次日8:34 → post-market (盘后总结)
+function getCurrentBriefingType() {
+  const now = getBeijingNow();
+  const h = now.getHours();
+  const m = now.getMinutes();
+  const mins = h * 60 + m;
+
+  if (mins >= 8 * 60 + 35 && mins < 12 * 60 + 35) {
+    return 'pre-market';
+  } else if (mins >= 12 * 60 + 35 && mins < 18 * 60) {
+    return 'intraday';
+  } else {
+    return 'post-market';
+  }
+}
+
 // Generate daily pre-market briefing
 async function generateDailyBriefing() {
-  console.log(`[Scheduler] Generating daily pre-market briefing...`);
+  console.log(`[Scheduler] Generating daily briefing...`);
   try {
     // Clear cache so we get fresh data
     delete cache['market_analysis'];
     const data = await fetchMarketAnalysis();
-    const now = new Date();
+    const now = getBeijingNow();
+    const briefingType = getCurrentBriefingType();
     dailyBriefing = {
       date: data.tradeDate,
-      generatedAt: now.toISOString(),
+      generatedAt: new Date().toISOString(),
       generatedAtLocal: `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`,
-      type: 'pre-market', // pre-market / intraday / post-market
+      type: briefingType,
       data,
     };
     saveBriefingToDisk(dailyBriefing);
-    console.log(`[Scheduler] Daily briefing generated for ${data.tradeDate} at ${dailyBriefing.generatedAtLocal}`);
+    console.log(`[Scheduler] Daily briefing (${briefingType}) generated for ${data.tradeDate} at ${dailyBriefing.generatedAtLocal}`);
     return dailyBriefing;
   } catch (e) {
     console.error('[Scheduler] Failed to generate daily briefing:', e.message);
@@ -1098,20 +1149,20 @@ async function isTradingDay(dateStr) {
     const dates = await getRecentTradeDates(5);
     return dates.includes(dateStr);
   } catch (e) {
-    // Fallback: weekday check
-    const day = new Date().getDay();
+    // Fallback: weekday check (Beijing time)
+    const day = getBeijingNow().getDay();
     return day >= 1 && day <= 5;
   }
 }
 
 // Schedule config
 const SCHEDULE_CONFIG = {
-  preMarketHour: 8,    // 8:30 AM — pre-market briefing
-  preMarketMinute: 30,
-  intradayHour: 11,    // 11:35 AM — morning session review
+  preMarketHour: 8,    // 8:35 AM — pre-market briefing
+  preMarketMinute: 35,
+  intradayHour: 12,    // 12:35 PM — midday session review
   intradayMinute: 35,
-  postMarketHour: 15,  // 15:10 PM — post-market summary
-  postMarketMinute: 10,
+  postMarketHour: 18,  // 18:00 PM — post-market summary
+  postMarketMinute: 0,
 };
 
 // Scheduler: runs every minute, checks if it's time to generate
@@ -1120,7 +1171,7 @@ function startScheduler() {
   loadBriefingFromDisk();
 
   setInterval(async () => {
-    const now = new Date();
+    const now = getBeijingNow();
     const h = now.getHours();
     const m = now.getMinutes();
     const todayStr = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
@@ -1129,20 +1180,24 @@ function startScheduler() {
     // Avoid running the same minute twice
     if (timeKey === lastScheduleRun) return;
 
-    // Pre-market briefing: 8:30 AM
+    // Pre-market briefing: 8:35 AM
     if (h === SCHEDULE_CONFIG.preMarketHour && m === SCHEDULE_CONFIG.preMarketMinute) {
       const isTrading = await isTradingDay(todayStr);
       if (isTrading || true) { // Always generate on weekdays even if trade_cal hasn't updated
-        // Check if we already generated today's briefing
-        if (!dailyBriefing || dailyBriefing.date !== todayStr || dailyBriefing.type !== 'pre-market') {
+        // Check if we already generated today's pre-market briefing
+        const existing = dailyBriefings['pre-market'];
+        if (!existing || existing.date !== todayStr) {
           lastScheduleRun = timeKey;
           const brief = await generateDailyBriefing();
-          if (brief) brief.type = 'pre-market';
+          if (brief) {
+            brief.type = 'pre-market';
+            saveBriefingToDisk(brief);
+          }
         }
       }
     }
 
-    // Intraday review: 11:35 AM (after morning session)
+    // Intraday review: 12:35 PM (midday session)
     if (h === SCHEDULE_CONFIG.intradayHour && m === SCHEDULE_CONFIG.intradayMinute) {
       lastScheduleRun = timeKey;
       delete cache['market_analysis'];
@@ -1150,7 +1205,7 @@ function startScheduler() {
       if (data) {
         dailyBriefing = {
           date: data.tradeDate,
-          generatedAt: now.toISOString(),
+          generatedAt: new Date().toISOString(),
           generatedAtLocal: `${todayStr.slice(0,4)}-${todayStr.slice(4,6)}-${todayStr.slice(6)} ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`,
           type: 'intraday',
           data,
@@ -1160,7 +1215,7 @@ function startScheduler() {
       }
     }
 
-    // Post-market summary: 15:10 PM
+    // Post-market summary: 18:00 PM
     if (h === SCHEDULE_CONFIG.postMarketHour && m === SCHEDULE_CONFIG.postMarketMinute) {
       lastScheduleRun = timeKey;
       delete cache['market_analysis'];
@@ -1168,7 +1223,7 @@ function startScheduler() {
       if (data) {
         dailyBriefing = {
           date: data.tradeDate,
-          generatedAt: now.toISOString(),
+          generatedAt: new Date().toISOString(),
           generatedAtLocal: `${todayStr.slice(0,4)}-${todayStr.slice(4,6)}-${todayStr.slice(6)} ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`,
           type: 'post-market',
           data,
@@ -1266,8 +1321,30 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === '/api/briefing') {
-    // Return the latest daily briefing (pre-cached)
-    if (dailyBriefing && dailyBriefing.data) {
+    // Return the briefing matching the current time window
+    const targetType = getCurrentBriefingType();
+    const typeLabelMap = {
+      'pre-market': '盘前研判',
+      'intraday': '盘中回顾',
+      'post-market': '盘后总结',
+    };
+
+    // Try to serve the briefing for the current time window
+    const targetBriefing = dailyBriefings[targetType];
+    if (targetBriefing && targetBriefing.data) {
+      sendJSON(res, {
+        success: true,
+        data: targetBriefing.data,
+        meta: {
+          date: targetBriefing.date,
+          type: targetBriefing.type,
+          generatedAt: targetBriefing.generatedAt,
+          generatedAtLocal: targetBriefing.generatedAtLocal,
+          typeLabel: typeLabelMap[targetBriefing.type] || '行情分析',
+        },
+      });
+    } else if (dailyBriefing && dailyBriefing.data) {
+      // Fallback: show the latest available briefing if the target one hasn't been generated yet
       sendJSON(res, {
         success: true,
         data: dailyBriefing.data,
@@ -1276,7 +1353,8 @@ const server = http.createServer(async (req, res) => {
           type: dailyBriefing.type,
           generatedAt: dailyBriefing.generatedAt,
           generatedAtLocal: dailyBriefing.generatedAtLocal,
-          typeLabel: dailyBriefing.type === 'pre-market' ? '盘前研判' : dailyBriefing.type === 'intraday' ? '盘中回顾' : dailyBriefing.type === 'post-market' ? '盘后总结' : '行情分析',
+          typeLabel: typeLabelMap[dailyBriefing.type] || '行情分析',
+          note: `当前时段(${typeLabelMap[targetType]})数据尚未生成，显示最近一次分析`,
         },
       });
     } else {
@@ -1327,9 +1405,16 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/schedule') {
     // Return schedule config and status
     const now = new Date();
+    const currentType = getCurrentBriefingType();
     sendJSON(res, {
       success: true,
       schedule: SCHEDULE_CONFIG,
+      currentBriefingType: currentType,
+      briefings: Object.keys(dailyBriefings).reduce((acc, k) => {
+        const b = dailyBriefings[k];
+        acc[k] = b ? { date: b.date, generatedAtLocal: b.generatedAtLocal } : null;
+        return acc;
+      }, {}),
       lastBriefing: dailyBriefing ? {
         date: dailyBriefing.date,
         type: dailyBriefing.type,
